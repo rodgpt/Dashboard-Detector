@@ -1,0 +1,14 @@
+{
+  "name": "oceankind-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && node scripts/copy-static.mjs",
+    "watch": "tsc --watch",
+    "types": "openapi-typescript ../docs/openapi.json -o src/generated/api-types.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "openapi-typescript": "^7.4.0"
+  }
+}

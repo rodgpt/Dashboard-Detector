@@ -1,0 +1,14 @@
+services:
+  api:
+    build: ./api
+    env_file: .env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./api/app:/app/app          # hot reload in dev
+      - ./api/tests:/app/tests:ro   # so `make test` finds them; the image ships without tests
+      - ./api/pytest.ini:/app/pytest.ini:ro
+      - ./data:/data                # sqlite lives here, survives rebuilds
+      - ./fixtures:/fixtures:ro     # local storage backend reads this
+      - ./web/dist:/web:ro          # compiled frontend, served by the api
+    restart: unless-stopped

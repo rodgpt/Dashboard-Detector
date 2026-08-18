@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAR FUTURA — Administración</title>
+  <link rel="stylesheet" href="/css/auth.css" />
+</head>
+<body class="admin-body">
+  <header class="admin-header">
+    <div class="header-left">
+      <img src="/assets/logo.png" class="brand-logo" alt="MAR FUTURA" />
+      <div>
+        <h1>Administración</h1>
+        <p>Usuarios, sitios y dispositivos</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <span class="who" id="who"></span>
+      <a href="/">Volver al panel</a>
+      <button type="button" id="logout" class="btn btn-ghost btn-sm">Cerrar sesión</button>
+    </div>
+  </header>
+
+  <!-- Sin permiso de administración: mensaje, no redirección (403 ≠ 401) -->
+  <main id="forbidden" hidden>
+    <div class="banner error" role="alert">
+      Tu cuenta no tiene permiso de administración. Si crees que es un error,
+      contacta a la persona administradora.
+    </div>
+  </main>
+
+  <main id="app" hidden>
+    <div id="page-error" class="banner error" role="alert" hidden>
+      <span id="page-error-text"></span>
+      <button type="button" id="retry" class="btn btn-ghost btn-sm">Reintentar</button>
+    </div>
+
+    <section class="panel">
+      <h2>Crear usuario</h2>
+      <form id="create-form" novalidate>
+        <div class="form-grid">
+          <div class="field">
+            <label for="new-email">Correo electrónico</label>
+            <input type="email" id="new-email" autocomplete="off" required />
+          </div>
+          <div class="field">
+            <label for="new-password">Contraseña</label>
+            <input type="password" id="new-password" autocomplete="new-password"
+                   minlength="12" required />
+            <p class="hint">Mínimo 12 caracteres.</p>
+          </div>
+          <div class="field">
+            <label for="new-role">Rol</label>
+            <select id="new-role">
+              <option value="operator" selected>Operación — ve sus sitios asignados</option>
+              <option value="admin">Administración — ve todo y gestiona usuarios</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Sitios asignados</label>
+          <div id="new-sites" class="site-checks" aria-label="Sitios asignados"></div>
+          <p class="hint">Una cuenta de administración ve todos los sitios; las casillas
+             sólo aplican al rol de operación.</p>
+        </div>
+        <div id="create-feedback" class="form-feedback" role="alert" hidden></div>
+        <button type="submit" id="create-submit" class="btn btn-primary">Crear usuario</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Usuarios</h2>
+      <div id="users-loading" class="loading">Cargando usuarios…</div>
+      <div class="table-wrap">
+        <table class="users" id="users-table" hidden>
+          <thead>
+            <tr>
+              <th scope="col">Correo</th>
+              <th scope="col">Rol</th>
+              <th scope="col">Sitios</th>
+              <th scope="col">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="users-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Dispositivos</h2>
+      <p class="panel-note">Cada equipo se autentica con una clave propia, separada de
+         las sesiones de usuario. La clave se muestra una sola vez al crearla; se copia
+         al archivo <code>/etc/oceankind.env</code> del equipo durante la preparación
+         en banco.</p>
+
+      <form id="device-form" novalidate>
+        <div class="form-grid">
+          <div class="field">
+            <label for="device-id">Identificador del equipo</label>
+            <input type="text" id="device-id" autocomplete="off"
+                   placeholder="Rpi_zapallar" pattern="[A-Za-z0-9_\-]{3,64}" required />
+            <p class="hint">3–64 caracteres: letras, dígitos, guion o guion bajo.</p>
+          </div>
+          <div class="field">
+            <label for="device-site">Sitio</label>
+            <select id="device-site"></select>
+          </div>
+        </div>
+        <div id="device-feedback" class="form-feedback" role="alert" hidden></div>
+        <button type="submit" id="device-submit" class="btn btn-primary">Crear dispositivo</button>
+      </form>
+
+      <div id="key-reveal" class="key-reveal" role="alert" hidden>
+        <p><strong>Clave creada. Se muestra una sola vez.</strong> Cópiala ahora y pégala
+           en <code>/etc/oceankind.env</code> del equipo. Si se pierde, elimina el
+           dispositivo y crea uno nuevo.</p>
+        <div class="key-line"><span>Identificador:</span> <code id="key-device-id"></code></div>
+        <div class="key-line"><span>Clave:</span> <code id="key-value"></code></div>
+        <button type="button" id="key-copy" class="btn btn-ghost btn-sm">Copiar clave</button>
+        <button type="button" id="key-dismiss" class="btn btn-ghost btn-sm">Ya la guardé — ocultar</button>
+      </div>
+
+      <div id="devices-loading" class="loading">Cargando dispositivos…</div>
+      <div class="table-wrap">
+        <table class="users" id="devices-table" hidden>
+          <thead>
+            <tr>
+              <th scope="col">Equipo</th>
+              <th scope="col">Sitio</th>
+              <th scope="col">Última conexión</th>
+              <th scope="col">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="devices-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/js/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,263 @@
+/* Login y administración. Compartida por login.html y admin.html.
+ *
+ * La paleta replica el "TEMA OSCURO MAR FUTURA" de index.html (la capa final
+ * con las variables --mf-*), que es el diseño que el cliente ve, no la capa
+ * clara superior que ese tema anula. Mismos valores, mismos tratamientos:
+ * portada con foto y tarjeta translúcida para el acceso, panel oscuro para
+ * la administración. Ver STYLEGUIDE.md.
+ */
+
+:root {
+  --bg:          #0c2230;                       /* --mf-bg */
+  --bg2:         #0e2836;                       /* --mf-bg2: inputs, selects */
+  --panel:       #12303f;                       /* --mf-panel */
+  --panel2:      #102b39;                       /* --mf-panel2 */
+  --text:        #e7f1f5;                       /* --mf-text */
+  --dim:         #9fbcc8;                       /* --mf-dim */
+  --border:      rgba(120, 175, 195, .16);      /* --mf-border */
+  --border-hi:   rgba(120, 175, 195, .22);
+  --brand:       #64b1c5;                       /* --mf-brand */
+  --brand-soft:  rgba(100, 177, 197, .14);      /* --mf-brand-soft */
+  --brand-dark:  #4a98ad;
+  --on-brand:    #062028;    /* texto sobre botón de marca, como .refresh-btn */
+
+  /* semántica sobre fondo oscuro: relleno translúcido + texto claro + borde medio */
+  --ok-fill:     rgba(34, 197, 94, .14);
+  --ok-text:     #86efac;
+  --ok-border:   rgba(34, 197, 94, .38);
+  --err-fill:    rgba(239, 68, 68, .14);
+  --err-text:    #fca5a5;
+  --err-border:  rgba(239, 68, 68, .40);
+  --warn:        #f59e0b;
+  --warn-fill:   rgba(245, 158, 11, .12);
+  --warn-text:   #f5d894;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: linear-gradient(180deg, #0b2030, #0c2230) fixed;
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 15px;
+}
+
+/* ── Marca ─────────────────────────────────────────── */
+.brand-logo { display: block; height: 56px; width: auto; }
+/* en la portada de acceso el logo va grande y en blanco, como en index */
+.auth-card .brand-logo {
+  height: auto; width: min(300px, 70%);
+  margin: 0 auto 6px;
+  filter: brightness(0) invert(1);
+}
+
+/* ── Formularios ───────────────────────────────────── */
+.field { margin-bottom: 16px; }
+.field label {
+  display: block;
+  font-size: .85rem; font-weight: 600;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+.field input, .field select {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: .95rem; font-family: inherit;
+  color: var(--text);
+  outline: none;
+}
+.field input:focus, .field select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+.field input::placeholder { color: var(--dim); opacity: .6; }
+.field .hint { font-size: .8rem; color: var(--dim); margin-top: 4px; }
+
+.btn {
+  border: none; border-radius: 8px;
+  padding: 10px 18px;
+  font-size: .9rem; font-weight: 600; font-family: inherit;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.btn:disabled { opacity: .55; cursor: wait; }
+.btn:focus-visible { outline: 3px solid var(--brand-soft); outline-offset: 1px; }
+/* botón de marca: texto oscuro y peso 700, como .refresh-btn del tema oscuro */
+.btn-primary { background: var(--brand); color: var(--on-brand); font-weight: 700; }
+.btn-primary:hover:not(:disabled) { background: var(--brand-dark); }
+/* fantasma: transparente con borde de marca, como .site-back-btn */
+.btn-ghost {
+  background: transparent; color: var(--brand);
+  border: 1px solid var(--brand);
+}
+.btn-ghost:hover:not(:disabled) { background: var(--brand-soft); }
+.btn-danger { background: transparent; color: var(--err-text); border: 1px solid var(--err-border); }
+.btn-danger:hover:not(:disabled) { background: var(--err-fill); }
+.btn-sm { padding: 5px 12px; font-size: .82rem; }
+
+/* Un fallo se ve como un fallo: relleno, borde y texto, nunca sólo color */
+.form-feedback {
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: .88rem; font-weight: 500;
+  margin-bottom: 16px;
+}
+.form-feedback.error { background: var(--err-fill); border: 1px solid var(--err-border); color: var(--err-text); }
+.form-feedback.ok    { background: var(--ok-fill);  border: 1px solid var(--ok-border);  color: var(--ok-text); }
+
+/* ── Página de acceso: tratamiento de portada ──────── */
+.auth-body {
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: linear-gradient(rgba(9, 26, 36, .42), rgba(9, 26, 36, .80)),
+              url("/assets/portada.jpg") center/cover fixed no-repeat;
+}
+/* tarjeta translúcida (glass), como .portada-card */
+.auth-card {
+  background: rgba(16, 42, 57, .82);
+  border: 1px solid var(--border-hi);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+  backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  padding: 36px 32px;
+  width: 100%; max-width: 420px;
+}
+.auth-head { text-align: center; margin-bottom: 8px; }
+.auth-head p { font-size: .9rem; color: var(--dim); margin-top: 4px; }
+.auth-card form { margin-top: 24px; }
+.auth-card .btn-primary { width: 100%; margin-top: 4px; font-size: 1rem; padding: 11px 22px; }
+
+/* ── Página de administración ──────────────────────── */
+.admin-body { padding: 28px 32px; max-width: 1100px; margin: 0 auto; }
+
+.admin-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  margin-bottom: 28px; padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.admin-header .header-left { display: flex; align-items: center; gap: 16px; }
+.admin-header h1 { font-size: 1.6rem; font-weight: 700; color: var(--text); }
+.admin-header p { font-size: .9rem; color: var(--dim); margin-top: 2px; }
+.admin-header .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.admin-header .who { font-size: .88rem; color: var(--dim); }
+.admin-header a { color: var(--brand); font-size: .9rem; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
+  padding: 22px 24px;
+  margin-bottom: 24px;
+}
+/* filete de marca a la izquierda del título, como .card h2 del tema oscuro */
+.panel > h2 {
+  font-size: 1.05rem; font-weight: 700; margin-bottom: 16px;
+  border-left: 3px solid var(--brand); padding-left: 12px;
+}
+.panel-note { font-size: .85rem; color: var(--dim); margin-bottom: 14px; }
+.panel-note code { font-size: .82rem; color: var(--text); background: var(--brand-soft);
+                   border-radius: 4px; padding: 1px 6px; }
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 18px;
+  align-items: start;
+}
+
+/* ── Tablas ────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; }
+table.users { width: 100%; border-collapse: collapse; font-size: .9rem; color: var(--text); }
+table.users th {
+  text-align: left; font-size: .8rem; font-weight: 600;
+  color: var(--dim); text-transform: uppercase; letter-spacing: .4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+table.users td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+table.users tbody tr:hover { background: var(--brand-soft); }
+table.users td.actions { white-space: nowrap; text-align: right; }
+table.users td.actions .btn + .btn { margin-left: 8px; }
+
+.role-badge {
+  display: inline-block;
+  background: var(--brand-soft);
+  border: 1px solid var(--border-hi);
+  border-radius: 20px;
+  padding: 2px 12px;
+  font-size: .8rem; font-weight: 600;
+  color: var(--brand);
+}
+.role-badge.admin { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+
+/* como .badge-device del tema oscuro */
+.chip {
+  display: inline-block;
+  background: var(--brand-soft);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2px 10px;
+  font-size: .8rem;
+  color: var(--brand);
+  margin: 2px 4px 2px 0;
+}
+.chip.none { color: var(--dim); border-style: dashed; background: none; }
+
+/* Selector de sitios: casillas, nunca lista codificada (los sitios son datos) */
+.site-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.site-checks label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .88rem; color: var(--text); font-weight: 400;
+  cursor: pointer;
+}
+.site-checks input { accent-color: var(--brand); }
+
+.row-editor { margin-top: 8px; padding: 10px 12px; background: var(--panel2);
+              border: 1px solid var(--border); border-radius: 8px; }
+.row-editor .btn { margin-top: 8px; }
+
+/* Clave de dispositivo: se muestra una sola vez, y lo dice a gritos.
+   Ámbar deliberadamente — no es un error, es un momento que no se repite. */
+.key-reveal {
+  border: 2px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn-fill);
+  padding: 14px 16px;
+  margin: 16px 0;
+  font-size: .9rem;
+  color: var(--text);
+}
+.key-reveal strong { color: var(--warn-text); }
+.key-reveal p { margin-bottom: 10px; }
+.key-line { margin: 4px 0; }
+.key-line span { color: var(--dim); font-size: .85rem; margin-right: 6px; }
+.key-line code {
+  font-size: .88rem;
+  background: var(--bg2);
+  border: 1px solid var(--border-hi);
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: var(--text);
+  word-break: break-all;
+  user-select: all;              /* un clic selecciona la clave completa */
+}
+.key-reveal .btn { margin-top: 10px; margin-right: 8px; }
+
+/* ── Estados de carga y error de página ────────────── */
+.banner {
+  border-radius: 8px; padding: 12px 16px; margin-bottom: 20px;
+  font-size: .9rem; font-weight: 500;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.banner.error { background: var(--err-fill); border: 1px solid var(--err-border); color: var(--err-text); }
+.loading { color: var(--dim); font-size: .9rem; padding: 12px 0; }

@@ -1,0 +1,1178 @@
+{
+ "components": {
+  "schemas": {
+   "DeviceCreated": {
+    "properties": {
+     "active": {
+      "title": "Active",
+      "type": "boolean"
+     },
+     "device_id": {
+      "title": "Device Id",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "integer"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "last_seen": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Seen"
+     },
+     "site_id": {
+      "title": "Site Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "device_id",
+     "site_id",
+     "active",
+     "last_seen",
+     "key"
+    ],
+    "title": "DeviceCreated",
+    "type": "object"
+   },
+   "DeviceIn": {
+    "properties": {
+     "device_id": {
+      "title": "Device Id",
+      "type": "string"
+     },
+     "site_id": {
+      "title": "Site Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "device_id",
+     "site_id"
+    ],
+    "title": "DeviceIn",
+    "type": "object"
+   },
+   "DeviceOut": {
+    "properties": {
+     "active": {
+      "title": "Active",
+      "type": "boolean"
+     },
+     "device_id": {
+      "title": "Device Id",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "integer"
+     },
+     "last_seen": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Seen"
+     },
+     "site_id": {
+      "title": "Site Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "device_id",
+     "site_id",
+     "active",
+     "last_seen"
+    ],
+    "title": "DeviceOut",
+    "type": "object"
+   },
+   "EventsPage": {
+    "properties": {
+     "contract": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Contract"
+     },
+     "has_more": {
+      "title": "Has More",
+      "type": "boolean"
+     },
+     "items": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "offset": {
+      "title": "Offset",
+      "type": "integer"
+     },
+     "scanned_blobs": {
+      "title": "Scanned Blobs",
+      "type": "integer"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "items",
+     "total",
+     "limit",
+     "offset",
+     "has_more",
+     "scanned_blobs"
+    ],
+    "title": "EventsPage",
+    "type": "object"
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "title": "Detail",
+      "type": "array"
+     }
+    },
+    "title": "HTTPValidationError",
+    "type": "object"
+   },
+   "Health": {
+    "properties": {
+     "status": {
+      "title": "Status",
+      "type": "string"
+     },
+     "storage": {
+      "title": "Storage",
+      "type": "string"
+     }
+    },
+    "required": [
+     "status",
+     "storage"
+    ],
+    "title": "Health",
+    "type": "object"
+   },
+   "LoginIn": {
+    "properties": {
+     "email": {
+      "format": "email",
+      "title": "Email",
+      "type": "string"
+     },
+     "password": {
+      "title": "Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "email",
+     "password"
+    ],
+    "title": "LoginIn",
+    "type": "object"
+   },
+   "Me": {
+    "properties": {
+     "email": {
+      "title": "Email",
+      "type": "string"
+     },
+     "role": {
+      "title": "Role",
+      "type": "string"
+     },
+     "sites": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Sites",
+      "type": "array"
+     }
+    },
+    "required": [
+     "email",
+     "role",
+     "sites"
+    ],
+    "title": "Me",
+    "type": "object"
+   },
+   "Ok": {
+    "properties": {
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "ok"
+    ],
+    "title": "Ok",
+    "type": "object"
+   },
+   "SitesIn": {
+    "properties": {
+     "sites": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Sites",
+      "type": "array"
+     }
+    },
+    "required": [
+     "sites"
+    ],
+    "title": "SitesIn",
+    "type": "object"
+   },
+   "SitesOut": {
+    "properties": {
+     "sites": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Sites",
+      "type": "array"
+     }
+    },
+    "required": [
+     "sites"
+    ],
+    "title": "SitesOut",
+    "type": "object"
+   },
+   "UserIn": {
+    "properties": {
+     "email": {
+      "format": "email",
+      "title": "Email",
+      "type": "string"
+     },
+     "password": {
+      "title": "Password",
+      "type": "string"
+     },
+     "role": {
+      "default": "operator",
+      "title": "Role",
+      "type": "string"
+     },
+     "sites": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Sites",
+      "type": "array"
+     }
+    },
+    "required": [
+     "email",
+     "password"
+    ],
+    "title": "UserIn",
+    "type": "object"
+   },
+   "UserOut": {
+    "properties": {
+     "active": {
+      "title": "Active",
+      "type": "boolean"
+     },
+     "email": {
+      "title": "Email",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "integer"
+     },
+     "role": {
+      "title": "Role",
+      "type": "string"
+     },
+     "sites": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Sites",
+      "type": "array"
+     }
+    },
+    "required": [
+     "id",
+     "email",
+     "role",
+     "active",
+     "sites"
+    ],
+    "title": "UserOut",
+    "type": "object"
+   },
+   "ValidationError": {
+    "properties": {
+     "ctx": {
+      "title": "Context",
+      "type": "object"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "title": "Location",
+      "type": "array"
+     },
+     "msg": {
+      "title": "Message",
+      "type": "string"
+     },
+     "type": {
+      "title": "Error Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError",
+    "type": "object"
+   }
+  }
+ },
+ "info": {
+  "title": "OceanKind",
+  "version": "2.0.0"
+ },
+ "openapi": "3.1.0",
+ "paths": {
+  "/api/admin/devices": {
+   "get": {
+    "operationId": "list_devices_api_admin_devices_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/DeviceOut"
+         },
+         "title": "Response List Devices Api Admin Devices Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "List Devices",
+    "tags": [
+     "admin"
+    ]
+   },
+   "post": {
+    "operationId": "create_device_api_admin_devices_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DeviceIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DeviceCreated"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Create Device",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/devices/{device_pk}": {
+   "delete": {
+    "description": "Revocation. The unit gets 401 on its next poll and keeps its last valid\nconfig, per DATA-CONTRACT.md expiry semantics.",
+    "operationId": "delete_device_api_admin_devices__device_pk__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "device_pk",
+      "required": true,
+      "schema": {
+       "title": "Device Pk",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Delete Device",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/users": {
+   "get": {
+    "operationId": "list_users_api_admin_users_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/UserOut"
+         },
+         "title": "Response List Users Api Admin Users Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "List Users",
+    "tags": [
+     "admin"
+    ]
+   },
+   "post": {
+    "operationId": "create_user_api_admin_users_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UserIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Create User",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/users/{user_id}": {
+   "delete": {
+    "operationId": "delete_user_api_admin_users__user_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "title": "User Id",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Delete User",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/users/{user_id}/sites": {
+   "put": {
+    "operationId": "set_sites_api_admin_users__user_id__sites_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "title": "User Id",
+       "type": "integer"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SitesIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Set Sites",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/auth/login": {
+   "post": {
+    "operationId": "login_api_auth_login_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LoginIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Ok"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Login",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
+  "/api/auth/logout": {
+   "post": {
+    "operationId": "logout_api_auth_logout_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Ok"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Logout",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
+  "/api/auth/me": {
+   "get": {
+    "operationId": "me_api_auth_me_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Me"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Me",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
+  "/api/devices/config": {
+   "get": {
+    "description": "Signed and clamped configuration, replacing the unsigned config blob (R-6.2, F-10).\n\nTODO: sign the payload with OCEANKIND_CONFIG_SIGNING_KEY and clamp every value\nto a safe range before returning. Thresholds are the client's to choose; the\nclamping and the signing are ours.",
+    "operationId": "device_config_api_devices_config_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-device-key",
+      "required": true,
+      "schema": {
+       "title": "X-Device-Key",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-device-id",
+      "required": true,
+      "schema": {
+       "title": "X-Device-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Device Config",
+    "tags": [
+     "devices"
+    ]
+   }
+  },
+  "/api/health": {
+   "get": {
+    "operationId": "health_api_health_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Health"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Health",
+    "tags": [
+     "ops"
+    ]
+   }
+  },
+  "/api/sites": {
+   "get": {
+    "description": "Only the sites this user may see. The list itself is a permission boundary.",
+    "operationId": "sites_api_sites_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SitesOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Sites",
+    "tags": [
+     "data"
+    ]
+   }
+  },
+  "/api/sites/{site_id}/acoustic": {
+   "get": {
+    "operationId": "acoustic_api_sites__site_id__acoustic_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Acoustic",
+    "tags": [
+     "data"
+    ]
+   }
+  },
+  "/api/sites/{site_id}/clips/{path}": {
+   "get": {
+    "description": "Audio proxied through the API, so the container stays private (R-5.4).",
+    "operationId": "clip_api_sites__site_id__clips__path__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "path",
+      "required": true,
+      "schema": {
+       "title": "Path",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Clip",
+    "tags": [
+     "data"
+    ]
+   }
+  },
+  "/api/sites/{site_id}/events": {
+   "get": {
+    "description": "Paginated and filtered. The browser gets a page, never the history (R-5.1).",
+    "operationId": "events_api_sites__site_id__events_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "since",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date-time",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Since"
+      }
+     },
+     {
+      "in": "query",
+      "name": "until",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date-time",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Until"
+      }
+     },
+     {
+      "in": "query",
+      "name": "event_type",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "pattern": "^(vessel|blast|unknown)$",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Event Type"
+      }
+     },
+     {
+      "in": "query",
+      "name": "min_score",
+      "required": false,
+      "schema": {
+       "default": 0.0,
+       "maximum": 1.0,
+       "minimum": 0.0,
+       "title": "Min Score",
+       "type": "number"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_suppressed",
+      "required": false,
+      "schema": {
+       "default": true,
+       "title": "Include Suppressed",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "maximum": 500,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EventsPage"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Events",
+    "tags": [
+     "data"
+    ]
+   }
+  },
+  "/api/sites/{site_id}/ocean": {
+   "get": {
+    "operationId": "ocean_api_sites__site_id__ocean_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Ocean",
+    "tags": [
+     "data"
+    ]
+   }
+  },
+  "/api/sites/{site_id}/power": {
+   "get": {
+    "operationId": "power_api_sites__site_id__power_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Power",
+    "tags": [
+     "data"
+    ]
+   }
+  },
+  "/api/sites/{site_id}/status": {
+   "get": {
+    "operationId": "status__api_sites__site_id__status_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Status ",
+    "tags": [
+     "data"
+    ]
+   }
+  }
+ }
+}

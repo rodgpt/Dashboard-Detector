@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAR FUTURA — Acceso</title>
+  <link rel="stylesheet" href="/css/auth.css" />
+</head>
+<body class="auth-body">
+  <main class="auth-card">
+    <div class="auth-head">
+      <img src="/assets/logo.png" class="brand-logo" alt="MAR FUTURA" />
+      <p>Monitoreo acústico marino — acceso</p>
+    </div>
+
+    <form id="login-form" novalidate>
+      <div class="field">
+        <label for="email">Correo electrónico</label>
+        <input type="email" id="email" name="email" autocomplete="username"
+               required autofocus />
+      </div>
+      <div class="field">
+        <label for="password">Contraseña</label>
+        <input type="password" id="password" name="password"
+               autocomplete="current-password" required />
+      </div>
+      <div id="feedback" class="form-feedback error" role="alert" hidden></div>
+      <button type="submit" id="submit" class="btn btn-primary">Ingresar</button>
+    </form>
+  </main>
+  <script type="module" src="/js/login.js"></script>
+</body>
+</html>

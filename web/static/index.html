@@ -1,0 +1,3129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAR FUTURA — Monitor Acústico</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f0f4f8;
+      color: #1a2636;
+      min-height: 100vh;
+      padding: 28px 32px;
+      font-size: 15px;
+    }
+
+    /* ── Header ─────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid #d0dce8;
+    }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    .logo-circle {
+      width: 48px; height: 48px; border-radius: 50%;
+      background: #64B1C5;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-weight: 800; font-size: 1rem; letter-spacing: .5px;
+    }
+    header h1 { font-size: 1.6rem; font-weight: 700; color: #64B1C5; }
+    header p  { font-size: .9rem; color: #9fbcc8; margin-top: 2px; }
+
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .status-pill {
+      display: flex; align-items: center; gap: 7px;
+      background: #e6f4ec; border: 1px solid #a8d5b5;
+      border-radius: 20px; padding: 6px 14px;
+      font-size: .85rem; color: #1a6e3a; font-weight: 500;
+      transition: all .3s;
+    }
+    .status-pill.offline {
+      background: #fdecea; border-color: #f5b8b5; color: #b91c1c;
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #22c55e; animation: pulse 2s infinite;
+    }
+    .status-pill.offline .status-dot { background: #ef4444; animation: none; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    /* ── Tabs ────────────────────────────────────────── */
+    .tab-nav {
+      display: flex; gap: 4px;
+      margin-bottom: 24px;
+      border-bottom: 2px solid #d0dce8;
+      padding-bottom: 0;
+    }
+    .tab-btn {
+      background: none; border: none;
+      padding: 10px 22px;
+      font-size: .92rem; font-weight: 600;
+      color: #9fbcc8; cursor: pointer;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      border-radius: 6px 6px 0 0;
+      transition: color .15s, border-color .15s;
+    }
+    .tab-btn:hover { color: #1a6fb5; }
+    .tab-btn.active {
+      color: #64B1C5;
+      border-bottom-color: #64B1C5;
+      background: rgba(10,74,124,.04);
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Filtros ─────────────────────────────────────── */
+    .filters {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 22px;
+    }
+    .filters label { font-size: .85rem; color: #9fbcc8; font-weight: 500; }
+    select {
+      background: white; border: 1px solid #c5d5e5;
+      border-radius: 8px; padding: 8px 14px;
+      font-size: .9rem; color: #1a2636; cursor: pointer;
+      outline: none; min-width: 180px;
+    }
+    select:hover { border-color: #64B1C5; }
+    .refresh-btn {
+      margin-left: auto;
+      background: #64B1C5; color: white;
+      border: none; border-radius: 8px;
+      padding: 8px 18px; font-size: .9rem; cursor: pointer;
+    }
+    .refresh-btn:hover { background: #0d5f9e; }
+
+    /* ── Stats ───────────────────────────────────────── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 14px; margin-bottom: 24px;
+    }
+    .stat-card {
+      background: white;
+      border: 1px solid #d0dce8;
+      border-radius: 12px;
+      padding: 18px 22px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .stat-card .label {
+      font-size: .78rem; color: #9fbcc8;
+      text-transform: uppercase; letter-spacing: .9px; font-weight: 600;
+    }
+    .stat-card .value {
+      font-size: 2rem; font-weight: 700; color: #64B1C5; margin-top: 6px;
+    }
+    .stat-card .value.small { font-size: 1.05rem; margin-top: 8px; }
+    .stat-card .value.na { font-size: 1.3rem; color: #b0c4d8; }
+    .stat-card .sub { font-size: .78rem; color: #8aa6b2; margin-top: 4px; }
+
+    /* ── Cards ───────────────────────────────────────── */
+    .card {
+      background: white;
+      border: 1px solid #d0dce8;
+      border-radius: 14px;
+      padding: 22px 26px;
+      margin-bottom: 22px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .card h2 {
+      font-size: .8rem; text-transform: uppercase;
+      letter-spacing: 1px; color: #9fbcc8;
+      margin-bottom: 6px; font-weight: 600;
+    }
+    .chart-hint {
+      font-size: .82rem; color: #8aa6b2; margin-bottom: 16px;
+    }
+    .chart-toolbar {
+      display: flex; align-items: center;
+      justify-content: space-between; margin-bottom: 10px;
+    }
+    .zoom-hint { font-size: .82rem; color: #8aa6b2; }
+    .reset-zoom-btn {
+      background: #edf2f7; border: 1px solid #c5d5e5;
+      color: #1a6fb5; border-radius: 7px;
+      padding: 5px 14px; font-size: .82rem; cursor: pointer; font-weight: 500;
+    }
+    .reset-zoom-btn:hover { background: #dce8f5; }
+    #chart-container { position: relative; height: 240px; }
+
+    /* ── Reproductor ─────────────────────────────────── */
+    #player-bar {
+      display: none;
+      align-items: center; gap: 16px;
+      background: #e8f2fc;
+      border: 1px solid #a0c4e8;
+      border-radius: 12px;
+      padding: 16px 22px;
+      margin-bottom: 22px;
+    }
+    #player-bar.visible { display: flex; }
+    .player-icon { font-size: 1.6rem; }
+    .player-meta { flex: 1; }
+    .player-ts    { font-size: .82rem; color: #9fbcc8; }
+    .player-level { font-size: 1rem; color: #64B1C5; font-weight: 600; margin-top: 2px; }
+    #player-bar audio { flex: 2; min-width: 0; width: 100%; }
+    .close-btn {
+      background: none; border: none; color: #9fbcc8;
+      font-size: 1.3rem; cursor: pointer; padding: 4px 8px;
+    }
+    .close-btn:hover { color: #1a2636; }
+
+    /* ── Tabla ───────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    thead th {
+      text-align: left; padding: 10px 14px;
+      color: #9fbcc8; font-size: .78rem;
+      text-transform: uppercase; letter-spacing: .9px;
+      border-bottom: 2px solid #e0eaf2; font-weight: 600;
+    }
+    tbody tr { border-bottom: 1px solid #edf2f7; transition: background .12s; }
+    tbody tr:hover { background: #f4f8fc; cursor: pointer; }
+    tbody td { padding: 11px 14px; color: #1a2636; }
+
+    .level-bar-bg {
+      background: #dde8f2; border-radius: 4px;
+      height: 8px; width: 100px; overflow: hidden; display: inline-block;
+      vertical-align: middle;
+    }
+    .level-bar-fill { height: 100%; border-radius: 4px; }
+
+    .play-btn {
+      background: #e8f2fc; border: 1px solid #a0c4e8;
+      color: #64B1C5; border-radius: 7px;
+      padding: 5px 14px; font-size: .85rem; cursor: pointer; font-weight: 500;
+    }
+    .play-btn:hover { background: #cce0f5; }
+
+    .no-alerts {
+      text-align: center; color: #8aa6b2;
+      padding: 48px; font-size: .95rem;
+    }
+
+    .badge-device {
+      background: #edf2f7; border-radius: 6px;
+      padding: 3px 10px; font-size: .8rem; color: #9fbcc8;
+    }
+
+    /* ── Estado del Sensor ───────────────────────────── */
+    .sensor-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .sensor-card {
+      background: white;
+      border: 1px solid #d0dce8;
+      border-radius: 12px;
+      padding: 18px 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .sensor-card .sc-label {
+      font-size: .75rem; color: #9fbcc8;
+      text-transform: uppercase; letter-spacing: .9px; font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .sensor-card .sc-value {
+      font-size: 1.5rem; font-weight: 700; color: #64B1C5;
+    }
+    .sensor-card .sc-value.na { color: #b0c4d8; font-size: 1.1rem; }
+    .sensor-card .sc-sub { font-size: .78rem; color: #8aa6b2; margin-top: 4px; }
+    .online-badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: #e6f4ec; border: 1px solid #a8d5b5;
+      border-radius: 20px; padding: 5px 14px;
+      font-size: .9rem; font-weight: 600; color: #1a6e3a;
+    }
+    .online-badge.offline {
+      background: #fdecea; border-color: #f5b8b5; color: #b91c1c;
+    }
+    .online-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #22c55e;
+    }
+    .online-badge.offline .online-dot { background: #ef4444; }
+
+    /* uptime bar */
+    .uptime-bar-bg {
+      background: #dde8f2; border-radius: 6px;
+      height: 10px; width: 100%; overflow: hidden; margin-top: 8px;
+    }
+    .uptime-bar-fill {
+      height: 100%; border-radius: 6px; background: #22c55e;
+      transition: width .6s ease;
+    }
+
+    /* ── Remote config form ──────────────────────────── */
+    .config-form {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label {
+      font-size: .82rem; font-weight: 600; color: #9fbcc8;
+      text-transform: uppercase; letter-spacing: .6px;
+    }
+    .form-group .desc {
+      font-size: .8rem; color: #8aa6b2; margin-top: -4px;
+    }
+    .form-group input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 6px;
+      background: #d0dce8; border-radius: 3px; outline: none; cursor: pointer;
+      border: none; padding: 0;
+    }
+    .form-group input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #64B1C5; cursor: pointer;
+      border: 2px solid white;
+      box-shadow: 0 1px 4px rgba(0,0,0,.2);
+    }
+    .range-row {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .range-val {
+      font-size: 1rem; font-weight: 700; color: #64B1C5;
+      min-width: 44px; text-align: right;
+    }
+    .form-group input[type=number] {
+      background: white; border: 1px solid #c5d5e5;
+      border-radius: 8px; padding: 9px 14px;
+      font-size: .95rem; color: #1a2636; outline: none;
+      width: 100%;
+    }
+    .form-group input[type=number]:focus { border-color: #64B1C5; }
+
+    .apply-btn {
+      background: #64B1C5; color: white; border: none;
+      border-radius: 9px; padding: 11px 28px;
+      font-size: .95rem; font-weight: 600;
+      cursor: pointer; margin-top: 6px;
+      transition: background .15s;
+    }
+    .apply-btn:hover { background: #0d5f9e; }
+    .apply-btn:disabled { background: #9fbcc8; cursor: default; }
+
+    .cfg-feedback {
+      margin-top: 12px; padding: 10px 16px;
+      border-radius: 8px; font-size: .88rem; font-weight: 500;
+      display: none;
+    }
+    .cfg-feedback.ok  { background: #e6f4ec; color: #1a6e3a; border: 1px solid #a8d5b5; }
+    .cfg-feedback.err { background: #fdecea; color: #b91c1c; border: 1px solid #f5b8b5; }
+
+    .sas-notice {
+      background: #fff8e6; border: 1px solid #f0d070;
+      border-radius: 10px; padding: 14px 18px;
+      font-size: .85rem; color: #7a5c00; margin-bottom: 20px;
+      line-height: 1.6;
+    }
+    .sas-notice code {
+      background: rgba(0,0,0,.07); padding: 1px 6px;
+      border-radius: 4px; font-size: .84rem;
+    }
+    .sas-notice details summary { cursor: pointer; font-weight: 600; }
+
+    .divider {
+      border: none; border-top: 1px solid #e0eaf2;
+      margin: 24px 0;
+    }
+
+    .last-refresh-note {
+      font-size: .8rem; color: #8aa6b2; margin-top: -10px; margin-bottom: 16px;
+    }
+
+    /* ── Barra uptime ────────────────────────────────────── */
+    .uptime-timeline {
+      display: flex; gap: 3px; align-items: stretch;
+      height: 36px; margin: 14px 0 8px;
+    }
+    .uptime-cell {
+      flex: 1; border-radius: 4px; cursor: pointer;
+      transition: opacity .15s, transform .1s;
+      position: relative;
+    }
+    .uptime-cell:hover { opacity: .75; transform: scaleY(1.08); }
+    .uptime-cell.active   { background: #22c55e; }
+    .uptime-cell.session  { background: #86efac; }
+    .uptime-cell.empty    { background: #e2e8f0; }
+    .uptime-cell.future   { background: #f1f5f9; }
+
+    .uptime-legend {
+      display: flex; gap: 16px; font-size: .78rem; color: #9fbcc8;
+      margin-bottom: 4px;
+    }
+    .uptime-legend span { display: flex; align-items: center; gap: 5px; }
+    .uptime-legend-dot {
+      width: 10px; height: 10px; border-radius: 2px; display: inline-block;
+    }
+
+    .uptime-scale-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .uptime-scale-btns { display: flex; gap: 4px; }
+    .scale-btn {
+      background: #edf2f7; border: 1px solid #c5d5e5;
+      color: #9fbcc8; border-radius: 6px;
+      padding: 4px 11px; font-size: .8rem; cursor: pointer; font-weight: 500;
+      transition: background .12s, color .12s;
+    }
+    .scale-btn.active {
+      background: #64B1C5; color: white; border-color: #64B1C5;
+    }
+    .uptime-labels {
+      display: flex; justify-content: space-between;
+      font-size: .74rem; color: #8aa6b2; margin-top: 4px;
+    }
+    .uptime-tooltip {
+      position: fixed; background: #1a2636; color: #e0ecf8;
+      border-radius: 8px; padding: 8px 12px; font-size: .82rem;
+      pointer-events: none; z-index: 1000; display: none;
+      line-height: 1.5; box-shadow: 0 4px 12px rgba(0,0,0,.25);
+    }
+    .uptime-pct {
+      font-size: 1.4rem; font-weight: 700; color: #64B1C5;
+    }
+    .uptime-pct-sub { font-size: .78rem; color: #8aa6b2; }
+
+    /* ── Mapa ───────────────────────────────────────────── */
+    #sensor-map {
+      height: 320px; border-radius: 10px;
+      overflow: hidden; border: 1px solid #d0dce8;
+    }
+    .leaflet-popup-content { font-size: .88rem; line-height: 1.6; }
+
+    /* ── Espectrograma ──────────────────────────────────── */
+    #spectrogram-modal {
+      display: none; position: fixed; inset: 0;
+      background: rgba(10,20,36,.72); z-index: 2000;
+      align-items: center; justify-content: center;
+    }
+    #spectrogram-modal.visible { display: flex; }
+    .spec-box {
+      background: white; border-radius: 16px;
+      padding: 28px 30px; max-width: 700px; width: 95%;
+      box-shadow: 0 8px 40px rgba(0,0,0,.35);
+    }
+    .spec-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 18px;
+    }
+    .spec-header h3 { font-size: 1rem; color: #64B1C5; font-weight: 700; }
+    .spec-close {
+      background: none; border: none; font-size: 1.4rem;
+      color: #9fbcc8; cursor: pointer; padding: 2px 8px;
+    }
+    .spec-close:hover { color: #1a2636; }
+    #spec-canvas { width: 100%; border-radius: 8px; display: block; }
+    #spec-audio-wrap { margin-top: 16px; }
+    #spec-audio-wrap audio { width: 100%; }
+    .spec-meta { font-size: .82rem; color: #9fbcc8; margin-top: 10px; }
+    #spec-loading {
+      text-align: center; color: #8aa6b2;
+      padding: 40px; font-size: .9rem;
+    }
+  </style>
+<style>
+  :root{ --brand:#64B1C5; --brand-dark:#3f8fa4; --brand-deep:#64B1C5; --brand-tint:#eaf4f7; }
+
+  /* Header con logo real */
+  .logo-circle{ display:none !important; }
+  .header-logo{ height:46px; width:auto; display:block; cursor:pointer; }
+  .site-back-btn{ background:#fff; border:1px solid var(--brand); color:var(--brand-deep);
+    padding:7px 14px; border-radius:8px; font-weight:600; cursor:pointer; font-size:.85rem; margin-right:14px;
+    transition:background .15s; }
+  .site-back-btn:hover{ background:var(--brand-tint); }
+  .tab-btn.active{ background:rgba(100,177,197,.10) !important; }
+  .refresh-btn{ background:var(--brand) !important; border-color:var(--brand) !important; }
+  .refresh-btn:hover{ background:var(--brand-dark) !important; }
+
+  /* ===== Portada ===== */
+  #portada{ display:none; }
+  body.portada-mode > header,
+  body.portada-mode > nav.tab-nav,
+  body.portada-mode > .tab-panel{ display:none !important; }
+  body.portada-mode{ padding:0 !important; max-width:none !important; }
+  body.portada-mode #portada{ display:block; }
+
+  .portada-hero{ position:relative; color:#fff; text-align:center;
+    padding:64px 24px 72px; overflow:hidden;
+    background:#64B1C5; }
+  .portada-hero::before{ content:""; position:absolute; inset:0;
+    background:linear-gradient(180deg, rgba(46,111,128,.72), rgba(46,111,128,.86)),
+      url("assets/hero.jpg") center 40%/cover no-repeat; z-index:0; }
+  .portada-hero > *{ position:relative; z-index:1; }
+  .portada-logo{ width:min(420px,72vw); height:auto; filter:brightness(0) invert(1);
+    margin:0 auto 26px; display:block; }
+  .portada-tagline{ font-size:1.25rem; font-weight:600; letter-spacing:.3px; margin-bottom:10px; }
+  .portada-lead{ max-width:680px; margin:0 auto; font-size:1rem; line-height:1.6; color:#eaf4f7; }
+
+  .portada-body{ max-width:1000px; margin:-44px auto 0; padding:0 20px 60px; position:relative; z-index:2; }
+  .portada-card{ background:#fff; border-radius:16px; box-shadow:0 12px 40px rgba(20,60,72,.16);
+    padding:26px 28px; }
+  .portada-selector{ display:flex; flex-wrap:wrap; gap:14px; align-items:center; }
+  .portada-selector label{ font-weight:600; color:var(--brand-deep); font-size:.95rem; }
+  .portada-selector select{ flex:1; min-width:200px; padding:11px 12px; font-size:1rem;
+    border:1.5px solid #c2d6dd; border-radius:10px; color:#cfe0e8; background:#fff; }
+  .portada-enter{ background:var(--brand); color:#fff; border:none; padding:11px 22px;
+    border-radius:10px; font-weight:700; font-size:1rem; cursor:pointer; transition:background .15s; }
+  .portada-enter:hover{ background:var(--brand-dark); }
+  #portada-map{ width:100%; height:340px; border-radius:14px; margin-top:18px; overflow:hidden;
+    border:1px solid #d6e3e8; }
+  .portada-what{ margin-top:22px; }
+  .portada-what h3{ color:var(--brand-deep); font-size:1.05rem; margin-bottom:8px; }
+  .portada-what p{ color:#5a7280; font-size:.92rem; line-height:1.6; margin-bottom:8px; }
+  .portada-features{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-top:16px; }
+  .portada-feature{ background:var(--brand-tint); border-radius:12px; padding:14px 16px; }
+  .portada-feature .pf-ico{ font-size:1.4rem; }
+  .portada-feature .pf-t{ font-weight:700; color:var(--brand-deep); font-size:.92rem; margin:4px 0 2px; }
+  .portada-feature .pf-d{ font-size:.82rem; color:#9fbcc8; line-height:1.45; }
+  .portada-foot{ text-align:center; color:#8aa0aa; font-size:.8rem; margin-top:26px; }
+</style>
+<style>
+  /* ===================== TEMA OSCURO MAR FUTURA ===================== */
+  :root{
+    --mf-bg:#0c2230; --mf-bg2:#0e2836; --mf-panel:#12303f; --mf-panel2:#102b39;
+    --mf-brand:#64B1C5; --mf-brand-soft:rgba(100,177,197,.14);
+    --mf-text:#e7f1f5; --mf-dim:#9fbcc8; --mf-border:rgba(120,175,195,.16);
+  }
+  html, body{ background:var(--mf-bg) !important; color:var(--mf-text) !important; }
+  body{ background:linear-gradient(180deg,#0b2030,#0c2230) fixed !important; }
+
+  /* Logo más grande */
+  .portada-logo{ width:min(560px,86vw) !important; margin-bottom:30px !important; }
+  .header-logo{ height:56px !important; }
+
+  /* Header: MAR FUTURA solo arriba (centrado); abajo Zapallar (izq) y Sitios/señal (der) */
+  header{ border-bottom:1px solid var(--mf-border) !important; display:flex !important;
+    flex-direction:column !important; align-items:center !important; gap:14px; }
+  .header-logo{ height:92px !important; }
+  .header-row{ display:flex; width:100%; align-items:center; justify-content:space-between; gap:12px; }
+  .header-left{ display:block !important; text-align:left; }
+  .header-left h1{ color:var(--mf-text) !important; }
+  .header-left p{ color:var(--mf-dim) !important; margin-top:2px; }
+  .header-right{ display:flex; align-items:center; gap:14px; }
+  @media (max-width:640px){
+    .header-row{ flex-direction:column; align-items:center; gap:10px; }
+    .header-left{ text-align:center; }
+  }
+
+  /* Monitoreo: foto de fondo (misma idea que la portada). Foto visible arriba, se oscurece
+     hacia abajo para leer bien los datos densos. */
+  body:not(.portada-mode){ background:
+    linear-gradient(rgba(9,24,33,.48) 0%, rgba(9,24,33,.80) 34%, rgba(9,24,33,.93) 60%, rgba(9,24,33,.95) 100%),
+    url("assets/monitoring.jpg") center top/cover fixed no-repeat !important; }
+  body:not(.portada-mode) .card,
+  body:not(.portada-mode) .stat-card,
+  body:not(.portada-mode) .sensor-card,
+  body:not(.portada-mode) .filters{ background:rgba(16,42,57,.80) !important; backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px); }
+  .site-back-btn{ background:transparent !important; border:1px solid var(--mf-brand) !important; color:var(--mf-brand) !important; }
+  .site-back-btn:hover{ background:var(--mf-brand-soft) !important; }
+
+  /* Tabs */
+  .tab-nav{ border-bottom:1px solid var(--mf-border) !important; }
+  .tab-btn{ color:var(--mf-dim) !important; }
+  .tab-btn:hover{ color:var(--mf-brand) !important; }
+  .tab-btn.active{ color:var(--mf-text) !important; border-bottom-color:var(--mf-brand) !important; background:var(--mf-brand-soft) !important; }
+
+  /* Cards / paneles */
+  .card, .stat-card, .sensor-card{
+    background:var(--mf-panel) !important; border:1px solid var(--mf-border) !important;
+    box-shadow:0 6px 24px rgba(0,0,0,.22) !important; }
+  .card h2, .card h3{ color:var(--mf-text) !important; }
+  .card h2{ border-left:3px solid var(--mf-brand); padding-left:12px; }
+  .stat-card .label, .sc-label{ color:var(--mf-dim) !important; letter-spacing:.4px; }
+  .stat-card .value, .sc-value{ color:var(--mf-brand) !important; }
+  .sc-sub{ color:var(--mf-dim) !important; }
+
+  /* Texto / hints */
+  .chart-hint, .zoom-hint, .last-refresh-note, .no-alerts, .filters label{ color:var(--mf-dim) !important; }
+
+  /* Filtros / inputs / selects */
+  .filters{ background:var(--mf-panel2) !important; border:1px solid var(--mf-border) !important; }
+  select, input[type=number]{ background:var(--mf-bg2) !important; color:var(--mf-text) !important; border:1px solid var(--mf-border) !important; }
+  .refresh-btn{ background:var(--mf-brand) !important; border-color:var(--mf-brand) !important; color:#062028 !important; font-weight:700; }
+  .refresh-btn:hover{ filter:brightness(1.08); }
+
+  /* Tabla */
+  table{ color:var(--mf-text) !important; }
+  th{ color:var(--mf-dim) !important; border-bottom:1px solid var(--mf-border) !important; }
+  td, tbody td{ color:var(--mf-text) !important; border-bottom:1px solid var(--mf-border) !important; }
+  tbody tr:hover{ background:var(--mf-brand-soft) !important; }
+  .badge-device{ background:var(--mf-brand-soft) !important; color:var(--mf-brand) !important; }
+  .play-btn{ background:var(--mf-brand-soft) !important; border:1px solid var(--mf-brand) !important; color:var(--mf-brand) !important; }
+  .play-btn:hover{ background:var(--mf-brand) !important; color:#062028 !important; }
+  .level-bar-bg{ background:rgba(255,255,255,.10) !important; }
+
+  /* Status pill */
+  .status-pill{ background:var(--mf-panel) !important; border:1px solid var(--mf-border) !important; color:var(--mf-dim) !important; }
+
+  /* Portada: foto de fondo de toda la página */
+  body.portada-mode{ background:linear-gradient(rgba(9,26,36,.42), rgba(9,26,36,.80)),
+    url("assets/portada.jpg") center/cover fixed no-repeat !important; }
+  .portada-hero{ background:transparent !important; min-height:60vh;
+    display:flex; flex-direction:column; justify-content:center; padding:48px 24px !important; }
+  .portada-hero::before{ display:none !important; }
+  .portada-body{ margin-top:-24px !important; }
+  /* tarjeta translúcida (glass) para que se asome el fondo */
+  .portada-card{ background:rgba(16,42,57,.82) !important; border:1px solid rgba(120,175,195,.22);
+    box-shadow:0 20px 60px rgba(0,0,0,.5) !important; backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px); }
+  .portada-selector label{ color:var(--mf-text) !important; }
+  .portada-selector select{ background:var(--mf-bg2) !important; color:var(--mf-text) !important; border-color:var(--mf-border) !important; }
+  .portada-what h3{ color:var(--mf-brand) !important; }
+  .portada-what p{ color:var(--mf-dim) !important; }
+  .portada-feature{ background:var(--mf-brand-soft) !important; }
+  .portada-feature .pf-t{ color:var(--mf-brand) !important; }
+  .portada-feature .pf-d{ color:var(--mf-dim) !important; }
+  .portada-foot{ color:var(--mf-dim) !important; }
+
+  /* Modales */
+  #spectrogram-modal .spec-box, .player-bar, #audio-player{ background:var(--mf-panel) !important; color:var(--mf-text) !important; }
+
+  /* ── Estados de carga: spinner + skeleton (evita el "se ve roto") ── */
+  @keyframes mf-spin { to { transform: rotate(360deg); } }
+  @keyframes mf-shim { 0%{background-position:-460px 0} 100%{background-position:460px 0} }
+  .mf-spinner{ display:inline-block; width:13px; height:13px; vertical-align:-2px; margin-right:7px;
+    border:2px solid rgba(120,175,195,.35); border-top-color:var(--mf-brand);
+    border-radius:50%; animation:mf-spin .7s linear infinite; }
+  /* skeleton shimmer para el área de los gráficos mientras cargan */
+  .cwrap.loading::after{ content:""; position:absolute; inset:0; border-radius:10px;
+    background:linear-gradient(90deg, rgba(120,175,195,.06) 25%, rgba(120,175,195,.16) 37%, rgba(120,175,195,.06) 63%);
+    background-size:920px 100%; animation:mf-shim 1.3s ease-in-out infinite; z-index:1; pointer-events:none; }
+  .cwrap.loading canvas{ opacity:0; }
+  /* estado de error por pestaña */
+  .tab-error{ display:none; margin:10px 0; padding:12px 14px; border-radius:10px;
+    background:rgba(224,62,82,.12); border:1px solid rgba(224,62,82,.4); color:#f3b6bd; font-size:.9rem; }
+  .tab-error button{ margin-left:10px; background:var(--mf-brand); color:#062028; border:none;
+    padding:5px 12px; border-radius:7px; font-weight:700; cursor:pointer; }
+
+  /* ── Tooltip "?" para explicar controles técnicos ── */
+  .help-q{ display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px;
+    border-radius:50%; border:1px solid var(--mf-brand); color:var(--mf-brand); font-size:11px;
+    font-weight:700; cursor:help; margin-left:5px; position:relative; }
+  .help-q:hover::after{ content:attr(data-tip); position:absolute; bottom:130%; left:50%; transform:translateX(-50%);
+    width:240px; background:#0c2230; color:var(--mf-text); border:1px solid var(--mf-border); border-radius:8px;
+    padding:8px 10px; font-size:.78rem; font-weight:400; line-height:1.4; z-index:50; box-shadow:0 8px 24px rgba(0,0,0,.5); }
+
+  /* ── Jerarquía de KPIs en Estado del Sensor: destacar los 2-3 críticos ── */
+  .sensor-card.kpi-primary{ border-color:var(--mf-brand) !important; background:rgba(100,177,197,.12) !important; }
+  .sensor-card.kpi-primary .sc-value{ font-size:1.9rem; }
+  .sensor-card.kpi-muted{ opacity:.82; }
+  .sensor-card.kpi-muted .sc-value{ font-size:1.15rem; }
+</style>
+</head>
+<body class="portada-mode">
+
+<!-- ═══════════════════════════════════════════════════════════════ PORTADA -->
+<div id="portada">
+  <div class="portada-hero">
+    <img src="assets/logo.png" class="portada-logo" alt="MAR FUTURA" />
+    <div class="portada-tagline">Monitoreo Acústico Submarino</div>
+    <p class="portada-lead">
+      Una red de estaciones acústicas de bajo costo que escuchan el océano en tiempo real para
+      detectar amenazas como la pesca ilegal, y caracterizar el paisaje sonoro de la costa.
+    </p>
+  </div>
+
+  <div class="portada-body">
+    <div class="portada-card">
+      <div class="portada-selector">
+        <label for="site-select">Sitio de monitoreo:</label>
+        <select id="site-select">
+          <option value="zapallar">Zapallar</option>
+          <option value="matanzas">Matanzas</option>
+        </select>
+        <button class="portada-enter" onclick="enterSite(document.getElementById('site-select').value)">Ver monitoreo →</button>
+      </div>
+
+      <div id="portada-map"></div>
+
+      <div class="portada-what">
+        <h3>¿Qué es esta plataforma?</h3>
+        <p>
+          Cada estación combina un hidrófono, un pequeño computador y algoritmos de detección alimentados
+          por energía solar. Escucha las 24 horas, envía alertas cuando reconoce eventos de interés y
+          publica indicadores del estado del mar y del ecosistema. Elige un sitio para explorar sus datos.
+        </p>
+        <div class="portada-features">
+          <div class="portada-feature"><div class="pf-ico"></div><div class="pf-t">Alertas</div><div class="pf-d">Detecciones acústicas en tiempo real, con clips de audio y espectrogramas.</div></div>
+          <div class="portada-feature"><div class="pf-ico"></div><div class="pf-t">Paisaje sonoro</div><div class="pf-d">NDSI y clicks de camarón como pulso del ecosistema submarino.</div></div>
+          <div class="portada-feature"><div class="pf-ico"></div><div class="pf-t">Condiciones de mar</div><div class="pf-d">Olas, viento y pronóstico para anticipar cuándo sube el riesgo.</div></div>
+          <div class="portada-feature"><div class="pf-ico"></div><div class="pf-t">Análisis</div><div class="pf-d">Cruce de todas las fuentes para extraer conocimiento accionable.</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="portada-foot">MAR FUTURA</div>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <img src="assets/logo.png" class="header-logo" alt="MAR FUTURA" onclick="goToPortada()" title="Volver a la portada" />
+  <div class="header-row">
+    <div class="header-left">
+      <h1 id="site-name">Zapallar</h1>
+      <p>Monitoreo Acústico Submarino</p>
+    </div>
+    <div class="header-right">
+      <button class="site-back-btn" onclick="goToPortada()">← Sitios</button>
+      <div class="status-pill" id="global-status-pill">
+        <div class="status-dot"></div>
+        <span id="global-status-text">En línea</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- Tabs -->
+<nav class="tab-nav">
+  <button class="tab-btn active" onclick="switchTab('alertas',  this)">Alertas</button>
+  <button class="tab-btn"        onclick="switchTab('acustico', this)">Monitoreo Acústico</button>
+  <button class="tab-btn"        onclick="switchTab('oceano',   this)">Condiciones del mar</button>
+  <button class="tab-btn"        onclick="switchTab('analisis', this)">Análisis</button>
+  <button class="tab-btn"        onclick="switchTab('sensor',   this)">Estado del Sensor</button>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════ TAB: ALERTAS -->
+<div class="tab-panel active" id="tab-alertas">
+
+  <!-- Filtros -->
+  <div class="filters">
+    <label>Confianza modelo &ge;:<span class="help-q" data-tip="Cada detección tiene una probabilidad del modelo de ser real. Este control muestra solo las que superan ese umbral: más alto = menos alertas pero más seguras.">?</span></label>
+    <input id="confidence-slider" type="range" min="0" max="100" step="5" value="95"
+           style="width:140px;vertical-align:middle"
+           oninput="document.getElementById('confidence-value').textContent=this.value+'%'; applyFilter()" />
+    <span id="confidence-value" style="font-weight:600;color:#64B1C5;min-width:38px;display:inline-block">95%</span>
+
+    <label style="margin-left:10px;font-size:.8rem;color:#8aa6b2">
+      <input id="include-legacy" type="checkbox" checked onchange="applyFilter()" />
+      incluir antiguas sin modelo
+      <span class="help-q" data-tip="Detecciones antiguas grabadas antes de que el modelo estuviera activo, por lo que no tienen puntaje de confianza. Destíldalo para ver solo las evaluadas por el modelo.">?</span>
+    </label>
+
+    <button class="refresh-btn" onclick="loadData()">↻ Actualizar</button>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="label">Total alertas</div>
+      <div class="value" id="stat-total">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Última alerta</div>
+      <div class="value small" id="stat-last">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Nivel máximo</div>
+      <div class="value" id="stat-max">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Dispositivos activos</div>
+      <div class="value" id="stat-devices">—</div>
+    </div>
+  </div>
+
+  <!-- Reproductor -->
+  <div id="player-bar">
+    <div class="player-icon"></div>
+    <div class="player-meta">
+      <div class="player-ts"    id="player-ts">—</div>
+      <div class="player-level" id="player-level">—</div>
+    </div>
+    <audio id="audio-player" controls></audio>
+    <button class="close-btn" onclick="closePlayer()">✕</button>
+  </div>
+
+  <!-- Gráfico -->
+  <div class="card">
+    <h2>Línea de tiempo<span class="help-q" data-tip="Cada barra es una detección; la altura es el nivel de sonido. Scroll para zoom, arrastra para moverte. Haz clic en un día para ver y escuchar sus alertas en la tabla de abajo.">?</span></h2>
+    <div class="chart-toolbar">
+      <p class="zoom-hint">Clic en un día para ver sus detecciones</p>
+      <button class="reset-zoom-btn" onclick="resetZoom()">↺ Ver todo</button>
+    </div>
+    <div id="chart-container">
+      <canvas id="timeline-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Alertas por hora del día -->
+  <div class="card">
+    <h2>Alertas por hora del día</h2>
+    <p class="chart-hint">
+      Distribución horaria de las alertas (hora local). Revela franjas del día con más detecciones.
+    </p>
+    <div class="cwrap loading" style="position:relative;width:100%;height:220px">
+      <canvas id="alertDielChart" role="img" aria-label="Alertas por hora del día">Alertas por hora</canvas>
+    </div>
+  </div>
+
+  <!-- Tabla -->
+  <div class="card">
+    <h2>Alertas registradas</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha y hora</th>
+          <th>Nivel de sonido</th>
+          <th>Pico</th>
+          <th>Modelo</th>
+          <th>Dispositivo</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="alerts-tbody">
+        <tr><td colspan="6" class="no-alerts">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- /tab-alertas -->
+
+
+<!-- ═════════════════════════════════════════════════════ TAB: MONITOREO ACÚSTICO -->
+<div class="tab-panel" id="tab-acustico">
+
+  <p class="last-refresh-note" id="acustico-refresh-note">Cargando indicadores acústicos…</p>
+
+  <!-- Valores actuales -->
+  <div class="sensor-grid" style="margin-bottom:1rem">
+    <div class="sensor-card">
+      <div class="sc-label">Click rate (últ.)</div>
+      <div class="sc-value" id="ac-click-now">—</div>
+      <div class="sc-sub">clicks de camarón por segundo</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sc-label">NDSI (media 24 h)</div>
+      <div class="sc-value" id="ac-ndsi-now">—</div>
+      <div class="sc-sub" id="ac-ndsi-interp">balance biofonía vs antropofonía</div>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="card">
+    <h2>Línea de tiempo — últimos días</h2>
+    <p style="font-size:.82rem;color:#9fbcc8;margin:.2rem 0 .8rem">
+      NDSI (−1 antropofonía … +1 biofonía) y tasa de clicks de camarón, mediana cada 15 min.
+    </p>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:12px;color:#9fbcc8">
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:12px;height:3px;background:#1d9e75;display:inline-block"></span>NDSI</span>
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:12px;height:3px;background:#d85a30;display:inline-block"></span>Tasa de clicks (Hz)</span>
+    </div>
+    <div class="cwrap loading" style="position:relative;width:100%;height:260px">
+      <canvas id="acTimelineChart" role="img" aria-label="Serie de tiempo de NDSI y tasa de clicks">Timeline acústico</canvas>
+    </div>
+    <div id="ac-timeline-empty" style="display:none;color:#8aa6b2;font-size:.85rem;text-align:center;padding:1.5rem">
+      Aún no hay datos suficientes (el sensor debe acumular clips).
+    </div>
+  </div>
+
+  <!-- Ciclo diel -->
+  <div class="card">
+    <h2>Ciclo diel — patrón diario promedio</h2>
+    <p style="font-size:.82rem;color:#9fbcc8;margin:.2rem 0 .8rem">
+      Mediana por hora del día (hora local), banda = cuartiles 25–75%. Últimos días agregados.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem">
+      <div>
+        <div style="font-size:12px;color:#9fbcc8;margin-bottom:4px">NDSI por hora</div>
+        <div class="cwrap loading" style="position:relative;width:100%;height:220px">
+          <canvas id="acDielNdsiChart" role="img" aria-label="Ciclo diel de NDSI">Diel NDSI</canvas>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#9fbcc8;margin-bottom:4px">Click rate por hora</div>
+        <div class="cwrap loading" style="position:relative;width:100%;height:220px">
+          <canvas id="acDielClickChart" role="img" aria-label="Ciclo diel de click rate">Diel clicks</canvas>
+        </div>
+      </div>
+    </div>
+    <div id="ac-diel-empty" style="display:none;color:#8aa6b2;font-size:.85rem;text-align:center;padding:1.5rem">
+      Aún no hay datos suficientes para el ciclo diel.
+    </div>
+  </div>
+
+</div><!-- /tab-acustico -->
+
+
+<!-- ═════════════════════════════════════════════ TAB: CONDICIONES OCEANOGRÁFICAS -->
+<div class="tab-panel" id="tab-oceano">
+
+  <p class="last-refresh-note" id="oceano-refresh-note">Cargando condiciones oceanográficas…</p>
+
+  <!-- Ventana de buceo -->
+  <div class="card" id="ocean-window-card" style="border-left:5px solid #8aa6b2">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="font-size:2.4rem" id="oc-window-emoji"></div>
+      <div>
+        <div style="font-size:1.15rem;font-weight:700" id="oc-window-title">—</div>
+        <div style="font-size:.85rem;color:#9fbcc8" id="oc-window-sub">
+          Mar bueno para bucear = más riesgo de pesca ilegal. Ajusta los límites abajo.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Valores actuales -->
+  <div class="sensor-grid" style="margin-bottom:1rem">
+    <div class="sensor-card">
+      <div class="sc-label">Ola (sig.)</div>
+      <div class="sc-value" id="oc-wave-now">—</div>
+      <div class="sc-sub" id="oc-swell-now">swell —</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sc-label">Viento</div>
+      <div class="sc-value" id="oc-wind-now">—</div>
+      <div class="sc-sub" id="oc-gust-now">ráfaga —</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sc-label">Nubosidad</div>
+      <div class="sc-value" id="oc-cloud-now">—</div>
+      <div class="sc-sub" id="oc-weather-now">—</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sc-label">Temp. agua</div>
+      <div class="sc-value" id="oc-water-now">—</div>
+      <div class="sc-sub" id="oc-sun-now">—</div>
+    </div>
+  </div>
+
+  <p style="font-size:.82rem;color:#9fbcc8;margin:.2rem 0 .8rem">
+    Línea continua = observado (últimos días); línea punteada = pronóstico. La línea vertical marca “ahora”.
+    Fuente: WorldWeatherOnline · <span id="oc-loc-label">Zapallar</span>.
+  </p>
+
+  <!-- Olas -->
+  <div class="card">
+    <h2>Olas — swell y energía del mar</h2>
+    <div class="cwrap loading" style="position:relative;width:100%;height:240px">
+      <canvas id="ocWaveChart" role="img" aria-label="Altura de olas observada y pronosticada">Olas</canvas>
+    </div>
+  </div>
+
+  <!-- Viento -->
+  <div class="card">
+    <h2>Viento — velocidad y ráfaga</h2>
+    <div class="cwrap loading" style="position:relative;width:100%;height:240px">
+      <canvas id="ocWindChart" role="img" aria-label="Viento observado y pronosticado">Viento</canvas>
+    </div>
+  </div>
+
+  <!-- Nubosidad -->
+  <div class="card">
+    <h2>Nubosidad</h2>
+    <div class="cwrap loading" style="position:relative;width:100%;height:200px">
+      <canvas id="ocCloudChart" role="img" aria-label="Nubosidad observada y pronosticada">Nubosidad</canvas>
+    </div>
+  </div>
+
+  <div id="ocean-empty" style="display:none;color:#8aa6b2;font-size:.85rem;text-align:center;padding:1.5rem">
+    Aún no hay datos de condiciones oceanográficas (el job aún no ha corrido).
+  </div>
+
+  <!-- Configuración de "mar bueno para bucear" -->
+  <div class="card" id="dive-settings-card" style="border-left:5px solid #1d6fa5">
+    <h2>Definir “mar bueno para bucear”</h2>
+    <p style="font-size:.82rem;color:#9fbcc8;margin:.2rem 0 .9rem">
+      Fija los límites de una condición de mar calmo. Se reflejan como <b>líneas de umbral</b> en los gráficos de arriba,
+      alimentan la tarjeta de ventana de buceo y se usan en la pestaña <b>Análisis</b> para clasificar las alertas.
+      Se guardan en este navegador (solo afectan esta vista). La alerta de WhatsApp de buen mar se configura por separado.
+    </p>
+    <div style="margin-bottom:1rem">
+      <label style="font-size:.85rem;color:#cfe0e8">Definir mar calmo por:
+        <select id="dive-mode" onchange="applyDiveMode(this.value)" style="margin-left:8px;padding:6px 8px;border:1px solid rgba(150,180,195,0.28);border-radius:6px">
+          <option value="swellperiod">Swell + período</option>
+          <option value="energy">Energía del mar</option>
+        </select>
+      </label>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;align-items:end">
+      <div id="dive-group-swellperiod" style="display:contents">
+        <label style="font-size:.85rem;color:#cfe0e8">Swell máx (m)
+          <input id="dive-swell" type="number" step="0.1" min="0" style="width:100%;margin-top:4px;padding:6px;border:1px solid rgba(150,180,195,0.28);border-radius:6px" />
+        </label>
+        <label style="font-size:.85rem;color:#cfe0e8">Período máx (s)
+          <input id="dive-period" type="number" step="0.5" min="0" style="width:100%;margin-top:4px;padding:6px;border:1px solid rgba(150,180,195,0.28);border-radius:6px" />
+        </label>
+      </div>
+      <label id="dive-group-energy" style="font-size:.85rem;color:#cfe0e8;display:none">Energía del mar máx (swell²·período)
+        <input id="dive-energy" type="number" step="1" min="0" style="width:100%;margin-top:4px;padding:6px;border:1px solid rgba(150,180,195,0.28);border-radius:6px" />
+      </label>
+      <label style="font-size:.85rem;color:#cfe0e8">Viento máx (km/h)
+        <input id="dive-wind" type="number" step="1" min="0" style="width:100%;margin-top:4px;padding:6px;border:1px solid rgba(150,180,195,0.28);border-radius:6px" />
+      </label>
+    </div>
+    <div style="margin-top:1rem">
+      <div style="font-size:.85rem;color:#cfe0e8;margin-bottom:6px">Direcciones de viento favorables
+        <span style="color:#8aa6b2">(desde dónde sopla; destilda las que traen mar malo para bucear)</span></div>
+      <div id="dive-dirs" style="display:flex;flex-wrap:wrap;gap:10px;font-size:.85rem;color:#cfe0e8">
+        <label><input type="checkbox" id="dive-dir-N"  /> N</label>
+        <label><input type="checkbox" id="dive-dir-NE" /> NE</label>
+        <label><input type="checkbox" id="dive-dir-E"  /> E</label>
+        <label><input type="checkbox" id="dive-dir-SE" /> SE</label>
+        <label><input type="checkbox" id="dive-dir-S"  /> S</label>
+        <label><input type="checkbox" id="dive-dir-SW" /> SW</label>
+        <label><input type="checkbox" id="dive-dir-W"  /> W</label>
+        <label><input type="checkbox" id="dive-dir-NW" /> NW</label>
+      </div>
+    </div>
+    <div style="margin-top:1.1rem;display:flex;gap:10px;align-items:center">
+      <button id="dive-save-btn" class="refresh-btn" onclick="saveDiveFromForm()">Guardar límites</button>
+      <button class="refresh-btn" style="background:#17323f;color:#cfe0e8;border-color:rgba(150,180,195,0.28)" onclick="resetDiveForm()">Restablecer</button>
+    </div>
+  </div>
+
+</div><!-- /tab-oceano -->
+
+
+<!-- ═══════════════════════════════════════════════════════════ TAB: ANÁLISIS -->
+<div class="tab-panel" id="tab-analisis">
+
+  <p class="last-refresh-note" id="analisis-refresh-note">Cargando análisis…</p>
+
+  <!-- Insight cards -->
+  <div class="sensor-grid" style="margin-bottom:1rem">
+    <div class="sensor-card">
+      <div class="sc-label">Alertas (total)</div>
+      <div class="sc-value" id="an-total">—</div>
+      <div class="sc-sub" id="an-total-sub">todo el periodo</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sc-label">Alertas con mar bueno</div>
+      <div class="sc-value" id="an-goodpct">—</div>
+      <div class="sc-sub" id="an-goodpct-sub">de las alertas cruzables</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sc-label">NDSI mediana</div>
+      <div class="sc-value" id="an-ndsi">—</div>
+      <div class="sc-sub">paisaje sonoro (7d)</div>
+    </div>
+  </div>
+
+  <!-- Flagship: línea de tiempo integrada -->
+  <div class="card">
+    <h2>Línea de tiempo integrada</h2>
+    <p style="font-size:.82rem;color:#9fbcc8;margin:.2rem 0 .8rem">
+      Energía del mar y viento sobre el mismo eje temporal; cada ▲ es una alerta de detección.
+      Permite ver de un vistazo si las detecciones coinciden con mar calmo (buen buceo).
+    </p>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:12px;color:#9fbcc8">
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:12px;height:3px;background:#1d6fa5;display:inline-block"></span>Energía del mar</span>
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:12px;height:3px;background:#5b4b9e;display:inline-block"></span>Viento (km/h)</span>
+      <span style="display:flex;align-items:center;gap:6px"><span style="color:#e03e52;font-size:14px">▲</span>Alerta</span>
+    </div>
+    <div class="cwrap loading" style="position:relative;width:100%;height:280px">
+      <canvas id="anTimelineChart" role="img" aria-label="Línea de tiempo integrada de NDSI, swell y alertas">Línea de tiempo integrada</canvas>
+    </div>
+    <div id="an-timeline-empty" style="display:none;color:#8aa6b2;font-size:.85rem;text-align:center;padding:1.5rem">
+      Aún no hay suficientes datos combinados para la línea de tiempo.
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem">
+    <!-- Alertas por estado de mar -->
+    <div class="card">
+      <h2>Alertas por estado de mar</h2>
+      <p style="font-size:.82rem;color:#9fbcc8;margin:.2rem 0 .8rem">
+        Cada alerta se cruza con la condición de mar en ese momento. La hipótesis: más detecciones con “mar bueno”.
+      </p>
+      <div class="cwrap loading" style="position:relative;width:100%;height:220px">
+        <canvas id="anSeaChart" role="img" aria-label="Alertas por estado de mar">Alertas por estado de mar</canvas>
+      </div>
+    </div>
+    <!-- NDSI vs click rate (correlación, punto por punto) -->
+    <div class="card">
+      <h2>NDSI vs click rate</h2>
+      <p style="font-size:.82rem;color:#9fbcc8;margin:.2rem 0 .8rem">
+        Cada punto es una muestra acústica: NDSI (eje X) contra tasa de clicks de camarón (eje Y).
+        Sirve para ver si ambos indicadores se mueven juntos.
+      </p>
+      <div class="cwrap loading" style="position:relative;width:100%;height:220px">
+        <canvas id="anNdsiClickChart" role="img" aria-label="NDSI vs click rate">NDSI vs click rate</canvas>
+      </div>
+    </div>
+
+    <!-- Click rate vs energía del mar -->
+    <div class="card">
+      <h2>Click de camarón vs energía del mar</h2>
+      <p style="font-size:.82rem;color:#9fbcc8;margin:.2rem 0 .8rem">
+        Tasa de clicks y energía del mar (swell² × período) sobre el mismo eje temporal.
+        Explora si el oleaje modula la actividad biológica.
+      </p>
+      <div class="cwrap loading" style="position:relative;width:100%;height:220px">
+        <canvas id="anEnergyChart" role="img" aria-label="Click rate vs energía del mar">Click vs energía del mar</canvas>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /tab-analisis -->
+
+
+<!-- ═════════════════════════════════════════════════════ TAB: ESTADO SENSOR -->
+<div class="tab-panel" id="tab-sensor">
+
+  <!-- Aviso refresh -->
+  <p class="last-refresh-note" id="status-refresh-note">Cargando estado del sensor...</p>
+
+  <!-- Estado general -->
+  <div class="sensor-grid">
+    <div class="sensor-card kpi-primary" style="grid-column: span 2; min-width:0">
+      <div class="sc-label">Estado</div>
+      <div id="sc-status"><span class="online-badge offline"><span class="online-dot"></span>Sin datos</span></div>
+      <div class="sc-sub" id="sc-last-seen">Última vez visto: —</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sc-label">Uptime sesión</div>
+      <div class="sc-value" id="sc-uptime">—</div>
+      <div class="uptime-bar-bg"><div class="uptime-bar-fill" id="sc-uptime-bar" style="width:0%"></div></div>
+      <div class="sc-sub" id="sc-session-start">Inicio: —</div>
+    </div>
+    <div class="sensor-card">
+      <div class="sc-label">Alertas (sesión)</div>
+      <div class="sc-value" id="sc-alert-count">—</div>
+      <div class="sc-sub">detectadas en esta sesión</div>
+    </div>
+    <div class="sensor-card kpi-muted">
+      <div class="sc-label">Umbral activo</div>
+      <div class="sc-value" id="sc-threshold">—</div>
+      <div class="sc-sub">nivel RMS para alertar</div>
+    </div>
+    <div class="sensor-card kpi-muted">
+      <div class="sc-label">Cooldown activo</div>
+      <div class="sc-value" id="sc-cooldown">—</div>
+      <div class="sc-sub">segundos entre alertas</div>
+    </div>
+    <div class="sensor-card kpi-primary">
+      <div class="sc-label">RMS último ciclo</div>
+      <div class="sc-value" id="sc-last-rms">—</div>
+      <div class="sc-sub">nivel de audio más reciente</div>
+    </div>
+    <div class="sensor-card kpi-muted">
+      <div class="sc-label">Versión software</div>
+      <div class="sc-value small" id="sc-sw-version">—</div>
+      <div class="sc-sub" id="sc-device-id">Dispositivo: —</div>
+    </div>
+  </div>
+
+  <!-- Barra de actividad -->
+  <div class="card">
+    <h2>Historial de actividad del sensor</h2>
+    <div class="uptime-scale-row">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="uptime-pct" id="uptime-pct">—</div>
+        <div>
+          <div style="font-size:.82rem;font-weight:600;color:#1a2636" id="uptime-pct-label">activo</div>
+          <div class="uptime-pct-sub" id="uptime-pct-range">en el período seleccionado</div>
+        </div>
+      </div>
+      <div class="uptime-scale-btns">
+        <button class="scale-btn active" onclick="setUptimeScale('6h',  this)">6h</button>
+        <button class="scale-btn"        onclick="setUptimeScale('24h', this)">24h</button>
+        <button class="scale-btn"        onclick="setUptimeScale('7d',  this)">7d</button>
+        <button class="scale-btn"        onclick="setUptimeScale('30d', this)">30d</button>
+      </div>
+    </div>
+    <div class="uptime-timeline" id="uptime-timeline"></div>
+    <div class="uptime-labels">
+      <span id="uptime-label-start">—</span>
+      <span id="uptime-label-end">Ahora</span>
+    </div>
+    <div class="uptime-legend">
+      <span><span class="uptime-legend-dot" style="background:#22c55e"></span>Con alertas</span>
+      <span><span class="uptime-legend-dot" style="background:#86efac"></span>Online (sin alertas)</span>
+      <span><span class="uptime-legend-dot" style="background:#e2e8f0"></span>Sin datos</span>
+    </div>
+  </div>
+
+  <!-- Tooltip flotante -->
+  <div class="uptime-tooltip" id="uptime-tooltip"></div>
+
+  <!-- Conectividad + audio -->
+  <div class="card">
+    <h2>Conectividad y captura</h2>
+    <div class="sensor-grid" style="margin-bottom:0">
+      <div class="sensor-card">
+        <div class="sc-label">Señal</div>
+        <div class="sc-value na" id="sc-rssi">—</div>
+        <div class="sc-sub" id="sc-signal-sub">conexión del sensor</div>
+      </div>
+      <div class="sensor-card">
+        <div class="sc-label">Dispositivo audio</div>
+        <div class="sc-value small" id="sc-audio-device">—</div>
+        <div class="sc-sub" id="sc-sample-rate">— Hz</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Energía solar (Victron BlueSolar MPPT vía VE.Direct) — oculta si no hay datos -->
+  <div class="card" id="solar-card">
+    <h2>Energía solar — Victron BlueSolar MPPT</h2>
+    <div class="sensor-grid" style="margin-bottom:0">
+      <div class="sensor-card">
+        <div class="sc-label">Batería</div>
+        <div class="sc-value" id="sc-batt-v">—</div>
+        <div class="sc-sub" id="sc-batt-sub">voltaje · corriente</div>
+      </div>
+      <div class="sensor-card">
+        <div class="sc-label">Panel solar</div>
+        <div class="sc-value" id="sc-panel-w">—</div>
+        <div class="sc-sub" id="sc-panel-sub">potencia · voltaje</div>
+      </div>
+      <div class="sensor-card">
+        <div class="sc-label">Estado de carga</div>
+        <div class="sc-value small" id="sc-charge-state">—</div>
+        <div class="sc-sub" id="sc-charge-sub">modo MPPT</div>
+      </div>
+      <div class="sensor-card">
+        <div class="sc-label">Generado hoy</div>
+        <div class="sc-value" id="sc-yield-today">—</div>
+        <div class="sc-sub" id="sc-yield-sub">total acumulado</div>
+      </div>
+      <div class="sensor-card">
+        <div class="sc-label">Consumo sistema</div>
+        <div class="sc-value" id="sc-load-w">—</div>
+        <div class="sc-sub" id="sc-load-sub">Pi + modem + audio (instantáneo)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sistema (CPU/SD/RAM/uptime del Pi) -->
+  <div class="card">
+    <h2>Sistema — estado interno de la Raspberry Pi</h2>
+    <div class="sensor-grid" style="margin-bottom:0">
+      <div class="sensor-card">
+        <div class="sc-label">Temperatura CPU</div>
+        <div class="sc-value" id="sc-cpu-temp">—</div>
+        <div class="sc-sub" id="sc-cpu-temp-sub">sensor interno del SoC</div>
+      </div>
+      <div class="sensor-card">
+        <div class="sc-label">SD card</div>
+        <div class="sc-value" id="sc-disk">—</div>
+        <div class="sc-sub" id="sc-disk-sub">uso / libre</div>
+      </div>
+      <div class="sensor-card">
+        <div class="sc-label">RAM</div>
+        <div class="sc-value" id="sc-ram">—</div>
+        <div class="sc-sub">memoria en uso</div>
+      </div>
+      <div class="sensor-card">
+        <div class="sc-label">⏱ Uptime sistema</div>
+        <div class="sc-value small" id="sc-sysup">—</div>
+        <div class="sc-sub">desde el último reboot del Pi</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Histórico de energía (últimas 72h) — oculto si no hay datos -->
+  <div class="card" id="power-card">
+    <h2>Energía — últimas 72 horas</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:8px;font-size:.78rem;color:#9fbcc8">
+      <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:12px;height:3px;background:#d85a30;display:inline-block"></span>Consumo (W)</span>
+      <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:12px;height:8px;background:#f0997b;opacity:.4;display:inline-block"></span>Panel solar (W)</span>
+      <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:12px;height:3px;background:#185fa5;display:inline-block"></span>Batería (V)</span>
+    </div>
+    <div class="cwrap loading" style="position:relative;width:100%;height:260px">
+      <canvas id="powerHistoryChart" role="img" aria-label="Gráfico de consumo, generación solar y voltaje de batería de las últimas 72 horas">Energía 72h</canvas>
+    </div>
+    <div id="power-history-empty" style="display:none;color:#8aa6b2;font-size:.85rem;text-align:center;padding:2rem">
+      Aún no hay datos históricos suficientes (el sensor debe acumular varias horas).
+    </div>
+  </div>
+
+</div><!-- /tab-sensor -->
+
+
+<!-- ══════════════════════════════════════════════════════════ TAB: MAPA -->
+<!-- (La pestaña Mapa se movió a la portada) -->
+
+
+<!-- Modal espectrograma -->
+<div id="spectrogram-modal">
+  <div class="spec-box">
+    <div class="spec-header">
+      <h3 id="spec-title">Espectrograma</h3>
+      <button class="spec-close" onclick="closeSpectrogram()">✕</button>
+    </div>
+    <div id="spec-loading">Cargando audio...</div>
+    <canvas id="spec-canvas" style="display:none"></canvas>
+    <div id="spec-audio-wrap" style="display:none">
+      <audio id="spec-audio" controls></audio>
+    </div>
+    <div class="spec-meta" id="spec-meta"></div>
+  </div>
+</div>
+
+
+<script>
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Constantes
+  // Fuente base de todos los gráficos (ejes, títulos, leyendas) más grande y legible
+  if (window.Chart) { Chart.defaults.font.size = 14; Chart.defaults.color = "#9fbcc8"; }
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Base de datos: ?data=/fixtures/ para desarrollo local, Azure por defecto.
+  const OK_DATA_BASE = (new URLSearchParams(location.search).get("data"))
+        || "https://marfuturatest.blob.core.windows.net/alerts/";
+  const BLOB_BASE_ROOT  = OK_DATA_BASE;
+  // URL de un dato del sitio ACTUAL (Zapallar en la raíz, Matanzas en "matanzas/").
+  function dataUrl(name) { return BLOB_BASE_ROOT + siteBase() + name; }
+  const AUTO_REFRESH_MS = 30000;
+  const STATUS_STALE_MS = 3 * 60 * 1000; // 3 min sin heartbeat = offline
+
+  // SAS_URL_KEY: clave localStorage donde guardamos la URL SAS para escritura
+  const SAS_URL_KEY = "oceankind_write_sas_url";
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Estado global
+  // ─────────────────────────────────────────────────────────────────────────────
+  let chartInstance  = null;
+  let allAlerts      = [];
+  let filtered       = [];
+  let lastStatus     = null;   // último status.json recibido
+  let currentScale   = "6h";  // escala activa en la barra de uptime
+
+  // ── Estados de carga / error (evita el "se ve roto") ──────────────────────────
+  function loadingNote(id, text) {
+    const e = document.getElementById(id);
+    if (e) e.innerHTML = '<span class="mf-spinner"></span>' + (text || "Cargando…");
+  }
+  function clearLoading(tabId) {
+    document.querySelectorAll("#" + tabId + " .cwrap.loading").forEach(c => c.classList.remove("loading"));
+  }
+  function errorNote(id, retryFn) {
+    const e = document.getElementById(id);
+    if (e) e.innerHTML = '⚠️ No se pudieron cargar los datos. <button class="refresh-btn" style="padding:4px 12px" onclick="' +
+      retryFn + '()">Reintentar</button>';
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Sitios / Portada
+  // ─────────────────────────────────────────────────────────────────────────────
+  // base = prefijo de blob del sitio en Azure ("" = raíz, para Zapallar; "matanzas/" para Matanzas).
+  const SITES = {
+    zapallar: { name: "Zapallar", lat: -32.552665, lon: -71.465068, base: "" },
+    matanzas: { name: "Matanzas", lat: -33.986651, lon: -71.860234, base: "matanzas/" },
+  };
+  let currentSite = "zapallar";
+  function siteBase() { return (SITES[currentSite] && SITES[currentSite].base) || ""; }
+
+  // Selección para "Alertas registradas": null (nada) | {type:'day'|'hour', value}
+  let tableSel = null;
+  function dayKey(ts) {
+    const d = new Date(ts);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function enterSite(key) {
+    if (!SITES[key]) return;
+    const changed = key !== currentSite;
+    currentSite = key;
+    const s = SITES[key];
+    document.getElementById("site-name").textContent = s.name;
+    document.body.classList.remove("portada-mode");
+    window.scrollTo(0, 0);
+    // Al cambiar de sitio, resetear estado y recargar los datos de ESE sitio.
+    if (changed || !allAlerts.length) {
+      allAlerts = []; lastStatus = null; tableSel = null;
+      // volver a la pestaña Alertas para no mostrar datos del sitio anterior
+      const alertasBtn = document.querySelector(".tab-nav .tab-btn");
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.getElementById("tab-alertas").classList.add("active");
+      if (alertasBtn) alertasBtn.classList.add("active");
+    }
+    loadData();          // recarga manifest + alertas del sitio actual
+    refreshGlobalPill(); // estado del sensor del sitio actual
+  }
+
+  function goToPortada() {
+    document.body.classList.add("portada-mode");
+    window.scrollTo(0, 0);
+    setTimeout(() => { if (portadaMap) portadaMap.invalidateSize(); }, 60);
+  }
+
+  // Mapa de la portada (selección de sitios)
+  let portadaMap = null, portadaMarkers = {};
+  function initPortadaMap() {
+    if (portadaMap) { portadaMap.invalidateSize(); return; }
+    const keys = Object.keys(SITES);
+    const first = SITES[keys[0]];
+    portadaMap = L.map("portada-map", { scrollWheelZoom: false }).setView([first.lat, first.lon], 9);
+    // Capa satelital (Esri World Imagery) + etiquetas de lugares
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 18, attribution: "© Esri" }).addTo(portadaMap);
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 18 }).addTo(portadaMap);
+    const icon = L.divIcon({ className: "", html:
+      '<div style="width:20px;height:20px;border-radius:50%;background:#64B1C5;border:3px solid #fff;box-shadow:0 0 0 2px #64B1C5"></div>',
+      iconSize: [20, 20], iconAnchor: [10, 10] });
+    const pts = [];
+    keys.forEach(k => {
+      const s = SITES[k];
+      const m = L.marker([s.lat, s.lon], { icon }).addTo(portadaMap)
+        .bindPopup(`<b>${s.name}</b><br><a href="#" onclick="enterSite('${k}');return false;">Ver monitoreo →</a>`);
+      m.on("click", () => m.openPopup());
+      portadaMarkers[k] = m;
+      pts.push([s.lat, s.lon]);
+    });
+    // Encuadrar todos los sitios (zoom out suficiente para ver ambos), con margen
+    if (pts.length > 1) {
+      portadaMap.fitBounds(L.latLngBounds(pts), { padding: [50, 50], maxZoom: 11 });
+    } else if (pts.length === 1) {
+      portadaMap.setView(pts[0], 12);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Tabs
+  // ─────────────────────────────────────────────────────────────────────────────
+  function switchTab(name, btn) {
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById("tab-" + name).classList.add("active");
+    btn.classList.add("active");
+    if (name === "sensor") loadStatus();
+    if (name === "acustico") loadAcoustic();
+    if (name === "oceano") loadOcean();
+    if (name === "analisis") loadAnalisis();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TAB ALERTAS — carga de datos
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (loadData se define en la sección Init para poder referenciar checkAutoPlay)
+
+  function refreshDeviceDropdown() { /* selector de dispositivo eliminado (un solo sitio) */ }
+
+  // umbral de "alerta roja" (alta intensidad) — se ocultan por ahora en Zapallar
+  const RED_LEVEL = 0.25;
+
+  // Predicado único de "alerta visible" — lo usan tanto la pestaña Alertas como Análisis
+  // para que los conteos coincidan (mismo filtro de confianza + intensidad).
+  function passesAlertFilter(a, minConfidence, includeLegacy) {
+    if (a.audio_level != null && a.audio_level >= RED_LEVEL) return false;  // ocultar alta intensidad
+    if (a.model_proba != null) return a.model_proba >= minConfidence;        // filtro confianza ML
+    return includeLegacy;                                                    // legacy sin score
+  }
+  function currentAlertFilter() {
+    return {
+      minConfidence: parseInt(document.getElementById("confidence-slider").value, 10) / 100,
+      includeLegacy: document.getElementById("include-legacy").checked,
+    };
+  }
+
+  function applyFilter() {
+    const { minConfidence, includeLegacy } = currentAlertFilter();
+
+    filtered = allAlerts.filter(a => passesAlertFilter(a, minConfidence, includeLegacy));
+    // Auto-seleccionar el día más reciente al cargar (la exploración por clic sigue disponible).
+    if (!tableSel && filtered.length) {
+      const latest = filtered.reduce((a, b) =>
+        new Date(a.timestamp) > new Date(b.timestamp) ? a : b);
+      tableSel = { type: "day", value: dayKey(latest.timestamp) };
+    }
+    renderStats(); renderChart(); renderTable(); renderAlertDiel();
+    clearLoading("tab-alertas");   // quita el skeleton del gráfico "Alertas por hora"
+    if (lastStatus) {
+      renderUptimeBar();
+      // Re-render del card "Alertas (sesión)" con el nuevo threshold
+      const sessionStartMs = lastStatus.session_start ? new Date(lastStatus.session_start).getTime() : 0;
+      const sessionAlertCount = allAlerts.filter(a =>
+        new Date(a.timestamp).getTime() >= sessionStartMs &&
+        (a.model_proba ?? 0) >= minConfidence
+      ).length;
+      const elAC = document.getElementById("sc-alert-count");
+      if (elAC) elAC.textContent = sessionAlertCount;
+    }
+  }
+
+  // ── Stats ────────────────────────────────────────────────────────────────────
+  function renderStats() {
+    document.getElementById("stat-total").textContent   = filtered.length;
+    const devices = new Set(allAlerts.map(a => a.device).filter(Boolean));
+    document.getElementById("stat-devices").textContent = devices.size || "—";
+    if (filtered.length > 0) {
+      document.getElementById("stat-last").textContent = formatTs(filtered[0].timestamp);
+      const maxLevel = Math.max(...filtered.map(a => a.audio_level));
+      document.getElementById("stat-max").textContent  = maxLevel.toFixed(3);
+    } else {
+      document.getElementById("stat-last").textContent = "—";
+      document.getElementById("stat-max").textContent  = "—";
+    }
+  }
+
+  // ── Gráfico ──────────────────────────────────────────────────────────────────
+  // Cada alerta es un EVENTO DISCRETO (no señal continua). Por eso usamos barras
+  // verticales tipo "stem" en vez de una línea que conectaría puntos a través de
+  // gaps largos (haciendo ver detecciones esporádicas como flujo continuo).
+  function renderChart() {
+    const sorted = [...filtered].sort((a,b) => new Date(a.timestamp)-new Date(b.timestamp));
+    const points = sorted.map(a => ({ x: new Date(a.timestamp).getTime(), y: a.audio_level }));
+    // Color único: solo importa detección vs no detección, no la intensidad.
+    const barColor = "#64B1C5";
+
+    // Escala fija a 0.10 — valores típicos del filtro están en 0.02-0.05.
+    const yMax   = 0.10;
+
+    // Si el chart ya existe → actualizar in-place (sin destroy/create = sin flicker)
+    if (chartInstance) {
+      chartInstance.data.datasets[0].data = points;
+      chartInstance.data.datasets[0].backgroundColor = barColor;
+      chartInstance.data.datasets[0].borderColor = barColor;
+      chartInstance.options.scales.y.max = yMax;
+      chartInstance._cachedSorted = sorted;  // referencia para onClick/tooltip
+      chartInstance.update("none");           // "none" = sin animación → sin flicker
+      return;
+    }
+
+    // Primer render: crear chart desde cero (con animación inicial)
+    const ctx = document.getElementById("timeline-chart").getContext("2d");
+    chartInstance = new Chart(ctx, {
+      type: "bar",
+      data: {
+        datasets: [{
+          label: "Nivel RMS por alerta",
+          data: points,
+          backgroundColor: barColor,
+          borderColor: barColor,
+          borderWidth: 0,
+          // Barras finas tipo "stem" — cada alerta es un palito vertical desde 0
+          // hasta su nivel RMS, sin conectarse entre sí.
+          barThickness: 4,
+          maxBarThickness: 6,
+          minBarLength: 2,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: false,  // sin animación en cualquier update → cero flicker
+        onClick: (evt, elements) => {
+          if (elements.length > 0) {
+            const cached = chartInstance._cachedSorted || sorted;
+            const a = cached[elements[0].index];
+            if (a) { tableSel = { type: "day", value: dayKey(a.timestamp) }; renderTable(); }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "#1a2636", titleColor: "#aac4dc",
+            bodyColor: "#e0ecf8", padding: 12,
+            callbacks: {
+              title: items => {
+                const cached = chartInstance._cachedSorted || sorted;
+                return formatTs(cached[items[0].dataIndex]?.timestamp);
+              },
+              label: ctx => {
+                const cached = chartInstance._cachedSorted || sorted;
+                const a = cached[ctx.dataIndex];
+                const lines = [
+                  ` Nivel RMS: ${ctx.parsed.y.toFixed(4)}`,
+                  ` Pico: ${a?.peak_db ?? "—"} dB`,
+                ];
+                if (a?.model_proba != null) {
+                  lines.push(` Modelo: ${a.model_label || "?"} (${(a.model_proba*100).toFixed(1)}%)`);
+                }
+                lines.push(` Dispositivo: ${a?.device ?? "—"}`);
+                return lines;
+              }
+            }
+          },
+          zoom: {
+            zoom:  { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" },
+            pan:   { enabled: true, mode: "x" },
+          }
+        },
+        scales: {
+          x: {
+            type: "time",
+            time: {
+              displayFormats: {
+                minute: "HH:mm",
+                hour:   "dd/MM HH:mm",
+                day:    "dd/MM",
+                week:   "dd/MM",
+                month:  "MM/yyyy",
+              }
+            },
+            ticks: { color: "#9fbcc8", maxRotation: 40, font: { size: 14 } },
+            grid:  { color: "rgba(255,255,255,0.07)" }
+          },
+          y: {
+            min: 0,
+            max: yMax,
+            title: { display: true, text: "Nivel RMS por alerta", color: "#9fbcc8", font: { size: 14 } },
+            ticks: { color: "#9fbcc8", font: { size: 14 } },
+            grid:  { color: "rgba(255,255,255,0.07)" }
+          }
+        }
+      }
+    });
+    chartInstance._cachedSorted = sorted;
+  }
+
+  // ── Alertas por hora del día (diel) ─────────────────────────────────────────
+  let alertDielChart = null;
+  function renderAlertDiel() {
+    const el = document.getElementById("alertDielChart");
+    if (!el) return;
+    const byHour = new Array(24).fill(0);
+    (filtered || []).forEach(a => { const h = new Date(a.timestamp).getHours(); if (h >= 0 && h < 24) byHour[h]++; });
+    const cfg = {
+      type: "bar",
+      data: { labels: Array.from({ length: 24 }, (_, h) => h + "h"), datasets: [
+        { label: "Alertas", data: byHour, backgroundColor: "rgba(100,177,197,0.7)", borderColor: "#64B1C5", borderWidth: 1, maxBarThickness: 26 },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        onClick: (evt, els) => { if (els.length) { tableSel = { type: "hour", value: els[0].index }; renderTable(); } },
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { title: items => items.length ? items[0].label + " (hora local) — clic para ver" : "" } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { autoSkip: true, maxTicksLimit: 12, font: { size: 13 } } },
+          y: { beginAtZero: true, title: { display: true, text: "n° alertas" },
+               ticks: { precision: 0, font: { size: 13 } }, grid: { color: "rgba(128,128,128,0.1)" } },
+        },
+      },
+    };
+    if (alertDielChart) { alertDielChart.data = cfg.data; alertDielChart.options = cfg.options; alertDielChart.update("none"); }
+    else alertDielChart = new Chart(el, cfg);
+  }
+
+  // ── Tabla ────────────────────────────────────────────────────────────────────
+  let tableRows = [];
+  function renderTable() {
+    const tbody = document.getElementById("alerts-tbody");
+    // Nada seleccionado → invitar a elegir un día o una hora
+    if (!tableSel) {
+      tableRows = [];
+      tbody.innerHTML = `<tr><td colspan="6" class="no-alerts">Selecciona un día en la línea de tiempo, o una hora en “Alertas por hora del día”, para ver y escuchar las detecciones.</td></tr>`;
+      return;
+    }
+    // Filtrar según la selección
+    let rows, selLabel;
+    if (tableSel.type === "day") {
+      rows = filtered.filter(a => dayKey(a.timestamp) === tableSel.value);
+      selLabel = `día ${tableSel.value}`;
+    } else {
+      rows = filtered.filter(a => new Date(a.timestamp).getHours() === tableSel.value);
+      selLabel = `${String(tableSel.value).padStart(2, "0")}:00–${String(tableSel.value).padStart(2, "0")}:59`;
+    }
+    rows.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    tableRows = rows;
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="no-alerts">Sin detecciones en ${selLabel}.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map((a, i) => {
+      const pct = Math.min(a.audio_level / 0.3 * 100, 100);
+      let modelCell = "—";
+      if (a.model_proba != null) {
+        const pos = a.model_pred === 1;
+        const pct2 = (a.model_proba * 100).toFixed(0);
+        modelCell = `<span class="badge-device">${a.model_label || (pos ? "+" : "-")} · ${pct2}%</span>`;
+      }
+      return `
+      <tr onclick="playAlert(tableRows[${i}])">
+        <td>${formatTs(a.timestamp)}</td>
+        <td>
+          <span class="level-bar-bg">
+            <span class="level-bar-fill" style="width:${pct}%;background:#64B1C5"></span>
+          </span>
+          &nbsp;<strong>${a.audio_level.toFixed(4)}</strong>
+        </td>
+        <td>${a.peak_db} dB</td>
+        <td>${modelCell}</td>
+        <td><span class="badge-device">${a.device || "—"}</span></td>
+        <td style="display:flex;gap:6px">
+          <button class="play-btn">▶ Escuchar</button>
+          ${a.audio_url ? `<button class="play-btn" onclick="event.stopPropagation();openSpectrogram(tableRows[${i}])">Espectro</button>` : ""}
+        </td>
+      </tr>`;
+    }).join("");
+  }
+
+  // ── Reproductor ──────────────────────────────────────────────────────────────
+  function playAlert(alert) {
+    if (!alert?.audio_url) return;
+    document.getElementById("player-ts").textContent    = formatTs(alert.timestamp);
+    document.getElementById("player-level").textContent =
+      `Nivel RMS: ${alert.audio_level.toFixed(4)}  ·  Pico: ${alert.peak_db} dB  ·  ${alert.device || ""}`;
+    const player = document.getElementById("audio-player");
+    player.src = alert.audio_url; player.play();
+    document.getElementById("player-bar").classList.add("visible");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function closePlayer() {
+    const p = document.getElementById("audio-player");
+    p.pause(); p.src = "";
+    document.getElementById("player-bar").classList.remove("visible");
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TAB SENSOR — carga de status.json
+  // ─────────────────────────────────────────────────────────────────────────────
+  async function loadStatus() {
+    loadingNote("status-refresh-note", "Cargando estado del sensor…");
+    try {
+      const res = await fetch(dataUrl("status.json") + "?t=" + Date.now());
+      if (!res.ok) throw new Error("status.json no encontrado — el sensor aún no ha enviado un heartbeat.");
+      const s = await res.json();
+      renderStatus(s);
+    } catch(e) {
+      document.getElementById("status-refresh-note").innerHTML =
+        e.message + ' <button class="refresh-btn" style="padding:4px 12px" onclick="loadStatus()">Reintentar</button>';
+      setGlobalPill(false);
+    }
+    // Histórico energía (independiente — falla silenciosa si aún no existe)
+    loadPowerHistory().catch(() => {});
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Power history chart (consumo + panel + batería últimas 72h)
+  // ─────────────────────────────────────────────────────────────────────────────
+  let powerChart = null;
+  let powerHistoryTimes = []; // timestamps (ms) de los puntos del power_history — sirven para marcar buckets online en el timeline
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TAB MONITOREO ACÚSTICO — NDSI + click rate
+  // ─────────────────────────────────────────────────────────────────────────────
+  let acTimelineChart = null, acDielNdsiChart = null, acDielClickChart = null;
+
+  async function loadAcoustic() {
+    const note = document.getElementById("acustico-refresh-note");
+    loadingNote("acustico-refresh-note", "Cargando indicadores acústicos…");
+    let data;
+    try {
+      const res = await fetch(dataUrl("acoustic_indicators.json") + "?t=" + Date.now());
+      if (!res.ok) throw 0;
+      data = await res.json();
+    } catch (_) {
+      clearLoading("tab-acustico");
+      note.innerHTML = "Aún no hay indicadores acústicos (el sensor debe acumular clips). " +
+        '<button class="refresh-btn" style="padding:4px 12px" onclick="loadAcoustic()">Reintentar</button>';
+      document.getElementById("ac-timeline-empty").style.display = "block";
+      document.getElementById("acTimelineChart").style.display   = "none";
+      document.getElementById("ac-diel-empty").style.display     = "block";
+      return;
+    }
+    clearLoading("tab-acustico");
+    note.textContent = "Última actualización: " + formatTs(data.updated);
+
+    // Valores actuales
+    const L = data.latest || {};
+    document.getElementById("ac-click-now").textContent =
+      (L.click_rate_hz != null) ? L.click_rate_hz.toFixed(1) + " /s" : "—";
+
+    // NDSI: media de las últimas 24 h (más estable que el último punto)
+    const cut24 = Date.now() - 24 * 3600 * 1000;
+    const ndsi24 = (data.timeline || [])
+      .filter(p => p.ndsi != null && new Date(p.ts).getTime() >= cut24)
+      .map(p => p.ndsi);
+    const ndsiMean = ndsi24.length ? ndsi24.reduce((a, b) => a + b, 0) / ndsi24.length : null;
+    if (ndsiMean != null) {
+      document.getElementById("ac-ndsi-now").textContent = (ndsiMean >= 0 ? "+" : "") + ndsiMean.toFixed(2);
+      document.getElementById("ac-ndsi-interp").textContent =
+        ndsiMean > 0.05 ? "biofonía predominante" :
+        ndsiMean < -0.05 ? "antropofonía (ruido humano) predominante" :
+        "balance neutro";
+    } else {
+      document.getElementById("ac-ndsi-now").textContent = "—";
+    }
+
+    // ── Timeline ──
+    const tl = (data.timeline || []).filter(p => p.ndsi != null || p.click != null);
+    if (tl.length === 0) {
+      document.getElementById("ac-timeline-empty").style.display = "block";
+      document.getElementById("acTimelineChart").style.display   = "none";
+    } else {
+      document.getElementById("ac-timeline-empty").style.display = "none";
+      document.getElementById("acTimelineChart").style.display   = "";
+      const labels = tl.map(p => new Date(p.ts));
+      const cfg = {
+        type: "line",
+        data: { labels, datasets: [
+          { label: "NDSI", data: tl.map(p => p.ndsi), borderColor: "#1d9e75",
+            backgroundColor: "#1d9e75", borderWidth: 1.8, pointRadius: 0, tension: 0.2, yAxisID: "y", spanGaps: true },
+          { label: "Tasa de clicks (Hz)", data: tl.map(p => p.click), borderColor: "#d85a30",
+            backgroundColor: "#d85a30", borderWidth: 1.2, pointRadius: 0, tension: 0.2, yAxisID: "y1", borderDash: [3,3], spanGaps: true },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          interaction: { intersect: false, mode: "index" },
+          plugins: { legend: { display: false } },
+          scales: {
+            x:  { type: "time", time: { unit: "hour", displayFormats: { hour: "dd/MM HH:mm" } },
+                  ticks: { autoSkip: true, maxTicksLimit: 8, font: { size: 13 } }, grid: { display: false } },
+            y:  { position: "left",  title: { display: true, text: "NDSI" }, min: -1, max: 1,
+                  grid: { color: "rgba(128,128,128,0.1)" }, ticks: { font: { size: 13 } } },
+            y1: { position: "right", title: { display: true, text: "Hz" }, beginAtZero: true,
+                  grid: { display: false }, ticks: { font: { size: 13 } } },
+          },
+        },
+      };
+      if (acTimelineChart) { acTimelineChart.data = cfg.data; acTimelineChart.options = cfg.options; acTimelineChart.update("none"); }
+      else acTimelineChart = new Chart(document.getElementById("acTimelineChart"), cfg);
+    }
+
+    // ── Diel ──
+    const diel = (data.diel || []);
+    const hasDiel = diel.some(d => d.ndsi_med != null);
+    if (!hasDiel) {
+      document.getElementById("ac-diel-empty").style.display = "block";
+    } else {
+      document.getElementById("ac-diel-empty").style.display = "none";
+      const hours = diel.map(d => d.hour + "h");
+      // banda IQR como área entre q1 y q3 (dataset relleno)
+      function ndsiClickCfg(medKey, q1Key, q3Key, color, fill, label, yOpts) {
+        return {
+          type: "line",
+          data: { labels: hours, datasets: [
+            { label: "q3", data: diel.map(d => d[q3Key]), borderColor: "transparent",
+              backgroundColor: fill, pointRadius: 0, fill: "+1", tension: 0.3, spanGaps: true },
+            { label: "q1", data: diel.map(d => d[q1Key]), borderColor: "transparent",
+              backgroundColor: fill, pointRadius: 0, fill: false, tension: 0.3, spanGaps: true },
+            { label, data: diel.map(d => d[medKey]), borderColor: color,
+              backgroundColor: color, borderWidth: 2, pointRadius: 0, tension: 0.3, spanGaps: true },
+          ] },
+          options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            interaction: { intersect: false, mode: "index" },
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { autoSkip: true, maxTicksLimit: 12, font: { size: 13 } }, grid: { display: false } },
+              y: Object.assign({ grid: { color: "rgba(128,128,128,0.1)" }, ticks: { font: { size: 13 } } }, yOpts),
+            },
+          },
+        };
+      }
+      const ndsiCfg  = ndsiClickCfg("ndsi_med", "ndsi_q1", "ndsi_q3", "#1d9e75", "rgba(29,158,117,0.18)", "NDSI", { min: -1, max: 1 });
+      const clickCfg = ndsiClickCfg("click_med", "click_q1", "click_q3", "#d85a30", "rgba(216,90,48,0.18)", "Tasa de clicks", { beginAtZero: true });
+      if (acDielNdsiChart) { acDielNdsiChart.data = ndsiCfg.data; acDielNdsiChart.options = ndsiCfg.options; acDielNdsiChart.update("none"); }
+      else acDielNdsiChart = new Chart(document.getElementById("acDielNdsiChart"), ndsiCfg);
+      if (acDielClickChart) { acDielClickChart.data = clickCfg.data; acDielClickChart.options = clickCfg.options; acDielClickChart.update("none"); }
+      else acDielClickChart = new Chart(document.getElementById("acDielClickChart"), clickCfg);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TAB CONDICIONES OCEANOGRÁFICAS — olas / viento / nubosidad (obs + pronóstico)
+  // ─────────────────────────────────────────────────────────────────────────────
+  let ocWaveChart = null, ocWindChart = null, ocCloudChart = null;
+
+  // plugin: línea vertical "ahora" en el timestamp del corte observado/pronóstico
+  if (!window._ocNowLineReg) {
+    window._ocNowLineReg = true;
+    Chart.register({
+      id: "ocNowLine",
+      afterDraw(chart, args, opts) {
+        const x = opts && opts.x;
+        if (x == null) return;
+        const xs = chart.scales.x, area = chart.chartArea;
+        const px = xs.getPixelForValue(x);
+        if (px < area.left || px > area.right) return;
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.strokeStyle = "#cfe0e8"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(px, area.top); ctx.lineTo(px, area.bottom); ctx.stroke();
+        ctx.setLineDash([]); ctx.fillStyle = "#cfe0e8"; ctx.font = "10px sans-serif";
+        ctx.textAlign = px > (area.left + area.right) / 2 ? "right" : "left";
+        ctx.fillText("ahora", px + (ctx.textAlign === "right" ? -4 : 4), area.top + 10);
+        ctx.restore();
+      },
+    });
+  }
+
+  // plugin: flechas de dirección de viento (submuestreadas) cerca del borde superior
+  if (!window._ocWindArrowsReg) {
+    window._ocWindArrowsReg = true;
+    Chart.register({
+      id: "ocWindArrows",
+      afterDatasetsDraw(chart, args, opts) {
+        const arr = opts && opts.arrows;
+        if (!arr || !arr.length) return;
+        const xs = chart.scales.x, area = chart.chartArea, ctx = chart.ctx;
+        const y = area.top + 10, every = Math.max(1, Math.round(arr.length / 14)), L = 6;
+        ctx.save(); ctx.strokeStyle = "#5b4b9e"; ctx.lineWidth = 1.1;
+        arr.forEach((a, i) => {
+          if (i % every !== 0 || a.deg == null) return;
+          const px = xs.getPixelForValue(a.x);
+          if (px < area.left || px > area.right) return;
+          // deg meteorológico = dirección DESDE la que sopla; el flujo va hacia deg+180. 0°=N=arriba.
+          const f = (a.deg + 180) * Math.PI / 180, dx = Math.sin(f), dy = -Math.cos(f);
+          const tx = px + dx * L, ty = y + dy * L;
+          ctx.beginPath(); ctx.moveTo(px - dx * L, y - dy * L); ctx.lineTo(tx, ty); ctx.stroke();
+          const h1 = f + Math.PI * 0.8, h2 = f - Math.PI * 0.8;
+          ctx.beginPath(); ctx.moveTo(tx, ty);
+          ctx.lineTo(tx + Math.sin(h1) * 4, ty - Math.cos(h1) * 4);
+          ctx.moveTo(tx, ty); ctx.lineTo(tx + Math.sin(h2) * 4, ty - Math.cos(h2) * 4);
+          ctx.stroke();
+        });
+        ctx.restore();
+      },
+    });
+  }
+
+  function _ocSeries(hourly, key) {
+    return hourly.map(p => ({ x: new Date(p.ts), y: p[key] }));
+  }
+
+  function _ocChart(canvasId, existing, datasets, boundaryMs, yTitle, yOpts, extra) {
+    extra = extra || {};
+    const scales = {
+      x: { type: "time", time: { unit: "day", displayFormats: { day: "dd/MM" } },
+           ticks: { autoSkip: true, maxTicksLimit: 9, font: { size: 13 } }, grid: { display: false } },
+      y: Object.assign({ title: { display: true, text: yTitle }, grid: { color: "rgba(128,128,128,0.1)" },
+           ticks: { font: { size: 13 } } }, yOpts || {}),
+    };
+    if (extra.y1Title) {
+      scales.y1 = Object.assign({ position: "right", title: { display: true, text: extra.y1Title },
+        grid: { display: false }, ticks: { font: { size: 13 } } }, extra.y1Opts || {});
+    }
+    if (extra.y2Title) {
+      scales.y2 = Object.assign({ position: "right", title: { display: true, text: extra.y2Title },
+        grid: { display: false }, ticks: { font: { size: 13 } }, offset: true }, extra.y2Opts || {});
+    }
+    const cfg = {
+      type: "line",
+      data: { datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { intersect: false, mode: "index" },
+        plugins: {
+          legend: { display: true, labels: { boxWidth: 12, font: { size: 14 }, filter: it => !it.text.startsWith("_") } },
+          ocNowLine: { x: boundaryMs },
+          ocWindArrows: { arrows: extra.arrows || null },
+          tooltip: { callbacks: {
+            title: items => items.length ? new Date(items[0].parsed.x)
+              .toLocaleString("es-CL", { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "",
+            afterBody: extra.afterBody ? items => extra.afterBody(items) : undefined,
+          } },
+        },
+        scales,
+      },
+    };
+    if (existing) { existing.data = cfg.data; existing.options = cfg.options; existing.update("none"); return existing; }
+    return new Chart(document.getElementById(canvasId), cfg);
+  }
+
+  // línea con tramo observado sólido + pronóstico punteado
+  function _ocLine(label, hourly, key, color, firstFcstIdx, extra) {
+    return Object.assign({
+      label, data: _ocSeries(hourly, key), borderColor: color, backgroundColor: color,
+      borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: true,
+      segment: { borderDash: ctx => ctx.p1DataIndex >= firstFcstIdx ? [4, 4] : undefined },
+    }, extra || {});
+  }
+
+  function _ocThreshold(label, hourly, value, color, yAxisID) {
+    if (value == null || !hourly.length) return null;
+    return { label, yAxisID: yAxisID || "y",
+      data: [{ x: new Date(hourly[0].ts), y: value }, { x: new Date(hourly[hourly.length - 1].ts), y: value }],
+      borderColor: color, borderWidth: 1.2, borderDash: [2, 3], pointRadius: 0, fill: false, tension: 0 };
+  }
+
+  // Energía del mar: proxy del flujo de energía de olas en aguas profundas, ∝ H²·T
+  // (altura de swell al cuadrado × período). Único lugar donde se define — cambiar aquí.
+  function seaEnergy(swell_m, period_s) {
+    if (swell_m == null || period_s == null) return null;
+    return swell_m * swell_m * period_s;
+  }
+
+  // ── umbrales de "mar bueno para bucear" (configurables por el usuario, persistentes) ──
+  const DIVE_KEY = "oceankind_dive_thresholds";
+  const DIVE_DIRS_ALL = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  function getDive() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem(DIVE_KEY)) || {}; } catch (_) {}
+    return {
+      mode: s.mode === "swellperiod" ? "swellperiod" : "energy",   // por defecto: energía del mar
+      swell_max:  s.swell_max  != null ? +s.swell_max  : 1.5,
+      period_max: s.period_max != null ? +s.period_max : 14,
+      energy_max: s.energy_max != null ? +s.energy_max : 25,
+      wind_max:   s.wind_max   != null ? +s.wind_max   : 15,
+      dirs: Array.isArray(s.dirs) ? s.dirs : DIVE_DIRS_ALL.slice(),
+    };
+  }
+  function saveDive(obj) { try { localStorage.setItem(DIVE_KEY, JSON.stringify(obj)); } catch (_) {} }
+  function windSector(deg) {
+    if (deg == null || isNaN(deg)) return null;
+    return DIVE_DIRS_ALL[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+  }
+  // ¿el punto cumple "mar bueno"? true / false / null (si falta info mínima)
+  function isGoodSea(p, d) {
+    if (!p) return null;
+    const w = p.wind_kmph, deg = p.wind_deg;
+    if (w == null) return null;
+    if (d.mode === "energy") {
+      const e = seaEnergy(p.swell_m, p.swell_period_s);
+      if (e == null) return null;
+      if (e > d.energy_max) return false;
+    } else {
+      const h = p.swell_m, t = p.swell_period_s;
+      if (h == null) return null;
+      if (h > d.swell_max) return false;
+      if (t != null && t > d.period_max) return false;
+    }
+    if (w > d.wind_max) return false;
+    const sec = windSector(deg);
+    if (sec && d.dirs.length < 8 && !d.dirs.includes(sec)) return false;
+    return true;
+  }
+  // El mar se considera APTO solo si hay una ventana continua de ≥ MIN_DIVE_WINDOW_H horas
+  // que cumple las condiciones seleccionadas.
+  const MIN_DIVE_WINDOW_H = 8;
+  // points: [{t(ms), swell_m, swell_period_s, wind_kmph, wind_deg}] ordenados por t. Devuelve [{start,end}] (ms).
+  function goodWindows(points, d, minH) {
+    const out = []; let i = 0;
+    while (i < points.length) {
+      if (isGoodSea(points[i], d) !== true) { i++; continue; }
+      let j = i;
+      while (j + 1 < points.length && isGoodSea(points[j + 1], d) === true) j++;
+      if ((points[j].t - points[i].t) >= minH * 3600 * 1000) out.push({ start: points[i].t, end: points[j].t });
+      i = j + 1;
+    }
+    return out;
+  }
+  function inGoodWindow(t, windows) { return windows.some(w => t >= w.start && t <= w.end); }
+
+  function applyDiveMode(mode) {
+    const sp = document.getElementById("dive-group-swellperiod");
+    const en = document.getElementById("dive-group-energy");
+    if (sp) sp.style.display = mode === "energy" ? "none" : "contents";
+    if (en) en.style.display = mode === "energy" ? "" : "none";
+  }
+  function populateDiveForm(d) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    const sel = document.getElementById("dive-mode"); if (sel) sel.value = d.mode;
+    set("dive-swell", d.swell_max); set("dive-period", d.period_max);
+    set("dive-energy", d.energy_max); set("dive-wind", d.wind_max);
+    DIVE_DIRS_ALL.forEach(dir => { const cb = document.getElementById("dive-dir-" + dir); if (cb) cb.checked = d.dirs.includes(dir); });
+    applyDiveMode(d.mode);
+  }
+  function saveDiveFromForm() {
+    const num = (id, fb) => { const v = parseFloat(document.getElementById(id).value); return isFinite(v) ? v : fb; };
+    const dirs = DIVE_DIRS_ALL.filter(dir => document.getElementById("dive-dir-" + dir).checked);
+    const mode = document.getElementById("dive-mode").value === "energy" ? "energy" : "swellperiod";
+    saveDive({ mode, swell_max: num("dive-swell", 1.5), period_max: num("dive-period", 14),
+      energy_max: num("dive-energy", 25), wind_max: num("dive-wind", 15),
+      dirs: dirs.length ? dirs : DIVE_DIRS_ALL.slice() });
+    const btn = document.getElementById("dive-save-btn");
+    if (btn) { const t = btn.textContent; btn.textContent = "✓ Guardado"; setTimeout(() => btn.textContent = t, 1400); }
+    loadOcean();                                   // redibuja líneas de umbral + ventana de buceo
+    if (anSeaChart) loadAnalisis();                // re-clasifica alertas por estado de mar
+  }
+  function resetDiveForm() { saveDive({}); populateDiveForm(getDive()); loadOcean(); if (anSeaChart) loadAnalisis(); }
+
+  async function loadOcean() {
+    const note = document.getElementById("oceano-refresh-note");
+    loadingNote("oceano-refresh-note", "Cargando condiciones del mar…");
+    let data;
+    try {
+      const res = await fetch(dataUrl("ocean_conditions.json") + "?t=" + Date.now());
+      if (!res.ok) throw 0;
+      data = await res.json();
+    } catch (_) {
+      clearLoading("tab-oceano");
+      note.innerHTML = "Aún no hay datos de condiciones del mar (el job aún no ha corrido). " +
+        '<button class="refresh-btn" style="padding:4px 12px" onclick="loadOcean()">Reintentar</button>';
+      document.getElementById("ocean-empty").style.display = "block";
+      return;
+    }
+    clearLoading("tab-oceano");
+    document.getElementById("ocean-empty").style.display = "none";
+    note.textContent = "Última actualización: " + formatTs(data.updated);
+    document.getElementById("oc-loc-label").textContent = data.location || "—";
+
+    const hourly = data.hourly || [];
+    const firstFcstIdx = Math.max(0, hourly.findIndex(p => p.is_forecast));
+    const boundaryMs = hourly.length ? new Date(hourly[firstFcstIdx] ? hourly[firstFcstIdx].ts : hourly[hourly.length - 1].ts).getTime() : null;
+    const thr = data.thresholds || {};
+
+    // ── tarjetas actuales ──
+    const c = data.current || {};
+    const f1 = (v, u) => (v != null ? v + u : "—");
+    document.getElementById("oc-wave-now").textContent  = f1(c.wave_m, " m");
+    document.getElementById("oc-swell-now").textContent = c.swell_m != null ? `swell ${c.swell_m} m · ${c.swell_period_s ?? "—"} s · ${c.swell_dir ?? ""}` : "swell —";
+    document.getElementById("oc-wind-now").textContent  = f1(c.wind_kmph, " km/h") + (c.wind_dir ? " " + c.wind_dir : "");
+    document.getElementById("oc-gust-now").textContent  = c.gust_kmph != null ? `ráfaga ${c.gust_kmph} km/h` : "ráfaga —";
+    document.getElementById("oc-cloud-now").textContent = f1(c.cloud_pct, " %");
+    document.getElementById("oc-weather-now").textContent = c.weather_desc || "—";
+    document.getElementById("oc-water-now").textContent = f1(c.water_temp_c, " °C");
+    const today = (data.daily || [])[0] || {};
+    document.getElementById("oc-sun-now").textContent = (today.sunrise && today.sunset) ? `${today.sunrise} · ${today.sunset}` : "—";
+
+    // umbrales configurables por el usuario (persistentes) → alimentan las líneas y la clasificación
+    const dive = getDive();
+    populateDiveForm(dive);
+
+    // ── ventana de buceo: apto solo si hay una ventana continua de ≥8 h ──
+    const card = document.getElementById("ocean-window-card");
+    const emoji = document.getElementById("oc-window-emoji");
+    const title = document.getElementById("oc-window-title");
+    const sub = document.getElementById("oc-window-sub");
+    const nowMs = Date.now();
+    const pts = hourly.map(p => ({ ...p, t: new Date(p.ts).getTime() }));
+    const windows = goodWindows(pts, dive, MIN_DIVE_WINDOW_H);
+    const currentT = (c && c.ts) ? new Date(c.ts).getTime() : null;
+    const goodNow = (c && c.swell_m != null && c.wind_kmph != null && currentT != null)
+      ? inGoodWindow(currentT, windows) : null;
+    if (goodNow === true) {
+      card.style.borderLeftColor = "#e0892b"; emoji.textContent = "";
+      title.textContent = "Mar APTO para bucear ahora (ventana ≥8 h) — vigilancia recomendada";
+    } else if (goodNow === false) {
+      card.style.borderLeftColor = "#3d7a52"; emoji.textContent = "";
+      title.textContent = "Mar no apto para buceo ahora";
+    } else {
+      card.style.borderLeftColor = "#8aa6b2"; emoji.textContent = "";
+      title.textContent = "Sin datos de condición actual";
+    }
+    // próxima ventana apta (≥8 h) en el pronóstico
+    const upcoming = windows.find(w => w.start > nowMs);
+    const dirsTxt = dive.dirs.length >= 8 ? "cualquiera" : dive.dirs.join(", ");
+    const seaLimit = dive.mode === "energy"
+      ? `energía del mar ≤ <b>${dive.energy_max}</b>`
+      : `swell ≤ <b>${dive.swell_max}</b> m · período ≤ <b>${dive.period_max}</b> s`;
+    if (upcoming) {
+      const t = new Date(upcoming.start).toLocaleString("es-CL", { weekday: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      const durH = Math.round((upcoming.end - upcoming.start) / 3600000);
+      sub.innerHTML = `Próxima ventana apta (≥8 h) en el pronóstico: <b>${t}</b>, dura ~<b>${durH} h</b>. Umbral: ${seaLimit} · viento ≤ <b>${dive.wind_max}</b> km/h · dir. ${dirsTxt}.`;
+    } else {
+      sub.innerHTML = `Se necesita una ventana continua de <b>≥8 h</b> con: ${seaLimit} · viento ≤ <b>${dive.wind_max}</b> km/h · dir. ${dirsTxt}. Sin ventana apta en el pronóstico.`;
+    }
+
+    if (!hourly.length) return;
+
+    // ── gráficos ──
+    // Olas: swell (altura) + energía del mar. El período alimenta la energía y el tooltip,
+    // pero no se grafica. La línea de umbral depende del modo elegido (por defecto: energía).
+    hourly.forEach(p => { p._energy = seaEnergy(p.swell_m, p.swell_period_s); });
+    const waveDs = [
+      _ocLine("Swell (m)", hourly, "swell_m", "#1d6fa5", firstFcstIdx),
+      Object.assign(_ocLine("Energía del mar", hourly, "_energy", "#3d7a52", firstFcstIdx, { borderWidth: 1.6 }),
+        { yAxisID: "y1" }),
+      dive.mode === "energy" ? _ocThreshold("Energía máx", hourly, dive.energy_max, "#3d7a52", "y1")
+                             : _ocThreshold("Swell máx", hourly, dive.swell_max, "#1d6fa5", "y"),
+    ].filter(Boolean);
+    ocWaveChart = _ocChart("ocWaveChart", ocWaveChart, waveDs, boundaryMs, "swell (m)", { beginAtZero: true }, {
+      y1Title: "energía del mar", y1Opts: { beginAtZero: true },
+      afterBody: items => {
+        const it = items.find(i => i.dataset.data.length === hourly.length) || items[0];
+        const p = hourly[it.dataIndex];
+        return p ? `Período: ${p.swell_period_s ?? "—"} s · Dir. swell: ${p.swell_dir || "—"}` : "";
+      },
+    });
+
+    // Viento: velocidad + ráfaga + umbral; dirección con flechas submuestreadas y en tooltip.
+    const windDs = [
+      _ocLine("Viento (km/h)", hourly, "wind_kmph", "#5b4b9e", firstFcstIdx),
+      _ocLine("Ráfaga (km/h)", hourly, "gust_kmph", "#a89bd6", firstFcstIdx, { borderWidth: 1.4 }),
+      _ocThreshold("Viento máx", hourly, dive.wind_max, "#d9534f"),
+    ].filter(Boolean);
+    ocWindChart = _ocChart("ocWindChart", ocWindChart, windDs, boundaryMs, "km/h", { beginAtZero: true }, {
+      arrows: hourly.map(p => ({ x: new Date(p.ts).getTime(), deg: p.wind_deg })),
+      afterBody: items => {
+        const it = items.find(i => i.dataset.data.length === hourly.length) || items[0];
+        const p = hourly[it.dataIndex];
+        return p ? `Dirección: ${p.wind_dir || "—"}${p.wind_deg != null ? " (" + Math.round(p.wind_deg) + "°)" : ""}` : "";
+      },
+    });
+
+    const cloudDs = [
+      _ocLine("Nubosidad (%)", hourly, "cloud_pct", "#8aa0b0", firstFcstIdx, { fill: true, backgroundColor: "rgba(138,160,176,0.18)" }),
+    ];
+    ocCloudChart = _ocChart("ocCloudChart", ocCloudChart, cloudDs, boundaryMs, "%", { min: 0, max: 100 });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TAB ANÁLISIS — cruce de alertas + paisaje sonoro + condiciones de mar
+  // ─────────────────────────────────────────────────────────────────────────────
+  let anTimelineChart = null, anSeaChart = null, anNdsiClickChart = null, anEnergyChart = null;
+
+  async function loadAnalisis() {
+    const note = document.getElementById("analisis-refresh-note");
+    loadingNote("analisis-refresh-note", "Cargando análisis…");
+
+    let acoustic = null, ocean = null;
+    try { const r = await fetch(dataUrl("acoustic_indicators.json") + "?t=" + Date.now()); if (r.ok) acoustic = await r.json(); } catch (_) {}
+    try { const r = await fetch(dataUrl("ocean_conditions.json") + "?t=" + Date.now());    if (r.ok) ocean    = await r.json(); } catch (_) {}
+
+    const now = Date.now();
+    // Rango de los GRÁFICOS: 7 días, porque las condiciones de mar solo cubren ese periodo.
+    // (El conteo de alertas de abajo NO usa esta ventana: cuenta todo el periodo.)
+    const WIN = 7 * 24 * 3600 * 1000, winStart = now - WIN;
+    const { minConfidence, includeLegacy } = currentAlertFilter();
+    // TODO el periodo (sin ventana de tiempo) y con el mismo filtro de confianza/intensidad que
+    // la pestaña Alertas → los dos conteos coinciden siempre por construcción.
+    const alerts = (allAlerts || []).filter(a =>
+      isFinite(new Date(a.timestamp).getTime()) && passesAlertFilter(a, minConfidence, includeLegacy));
+    // Etiqueta con el rango real cubierto por los datos
+    const subEl = document.getElementById("an-total-sub");
+    if (subEl) {
+      if (alerts.length) {
+        const ts = alerts.map(a => new Date(a.timestamp).getTime());
+        const f = t => new Date(t).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" });
+        const a0 = f(Math.min(...ts)), a1 = f(Math.max(...ts));
+        subEl.textContent = (a0 === a1) ? a0 : `${a0} – ${a1}`;
+      } else {
+        subEl.textContent = "sin alertas";
+      }
+    }
+
+    // condiciones de mar para el cruce (con todos los campos que usan los umbrales)
+    const dive = getDive();
+    const oh = (ocean && ocean.hourly) ? ocean.hourly.map(p => ({
+      t: new Date(p.ts).getTime(), swell_m: p.swell_m, swell_period_s: p.swell_period_s,
+      wind_kmph: p.wind_kmph, wind_deg: p.wind_deg,
+    })) : [];
+    const nearestSea = t => {
+      let best = null, bd = Infinity;
+      for (const p of oh) { const d = Math.abs(p.t - t); if (d < bd) { bd = d; best = p; } }
+      return (best && bd <= 2 * 3600 * 1000) ? best : null;   // dentro de 2 h
+    };
+    // "mar bueno" = la alerta cae dentro de una ventana continua de ≥8 h que cumple las condiciones
+    const anWindows = goodWindows(oh, dive, MIN_DIVE_WINDOW_H);
+    let good = 0, bad = 0, unk = 0;
+    alerts.forEach(a => {
+      const t = new Date(a.timestamp).getTime();
+      if (!nearestSea(t)) { unk++; return; }         // sin dato de mar cercano
+      if (inGoodWindow(t, anWindows)) good++; else bad++;
+    });
+    const cross = good + bad;
+
+    // ── tarjetas ──
+    document.getElementById("an-total").textContent = alerts.length;
+    document.getElementById("an-goodpct").textContent = cross ? Math.round(good / cross * 100) + "%" : "—";
+    document.getElementById("an-goodpct-sub").textContent = cross ? `${good}/${cross} cruzables` : "sin cruces aún";
+    const ndsiVals = (acoustic && acoustic.timeline ? acoustic.timeline : []).map(p => p.ndsi).filter(v => v != null);
+    let ndsiMed = null;
+    if (ndsiVals.length) { const s = [...ndsiVals].sort((a, b) => a - b); ndsiMed = s[Math.floor(s.length / 2)]; }
+    document.getElementById("an-ndsi").textContent = ndsiMed != null ? (ndsiMed >= 0 ? "+" : "") + ndsiMed.toFixed(2) : "—";
+    clearLoading("tab-analisis");
+    note.textContent = "Última actualización: " + formatTs(new Date(now).toISOString());
+
+    // ── línea de tiempo integrada ──
+    const tlEmpty = document.getElementById("an-timeline-empty");
+    if (!((acoustic && acoustic.timeline && acoustic.timeline.length) || oh.length || alerts.length)) {
+      tlEmpty.style.display = "block";
+      document.getElementById("anTimelineChart").style.display = "none";
+    } else {
+      tlEmpty.style.display = "none";
+      document.getElementById("anTimelineChart").style.display = "";
+      const energyData = oh.filter(p => p.t <= now).map(p => ({ x: new Date(p.t), y: seaEnergy(p.swell_m, p.swell_period_s) }))
+        .filter(p => p.y != null);
+      const windData   = oh.filter(p => p.wind_kmph != null && p.t <= now).map(p => ({ x: new Date(p.t), y: p.wind_kmph }));
+      const alertData  = alerts.map(a => ({ x: new Date(a.timestamp), y: 0.9, _a: a }));
+      const cfg = {
+        type: "line",
+        data: { datasets: [
+          { label: "Energía del mar", data: energyData, borderColor: "#1d6fa5", backgroundColor: "#1d6fa5",
+            borderWidth: 2, pointRadius: 0, tension: 0.25, yAxisID: "y", spanGaps: true },
+          { label: "Viento (km/h)", data: windData, borderColor: "#5b4b9e", backgroundColor: "#5b4b9e",
+            borderWidth: 1.4, pointRadius: 0, tension: 0.25, yAxisID: "y1", borderDash: [4, 3], spanGaps: true },
+          { label: "Alerta", data: alertData, type: "scatter", yAxisID: "yMark",
+            pointStyle: "triangle", radius: 7, backgroundColor: "#e03e52", borderColor: "#e03e52" },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          interaction: { intersect: false, mode: "nearest", axis: "x" },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              title: items => items.length ? new Date(items[0].parsed.x).toLocaleString("es-CL", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "",
+              label: ctx => {
+                if (ctx.dataset.label === "Alerta") {
+                  const a = ctx.raw._a || {};
+                  return `Alerta · RMS ${a.audio_level != null ? a.audio_level.toFixed(3) : "—"} · conf ${a.model_proba != null ? Math.round(a.model_proba * 100) + "%" : "—"}`;
+                }
+                return `${ctx.dataset.label}: ${ctx.parsed.y}`;
+              },
+            } },
+          },
+          scales: {
+            x:  { type: "time", min: winStart, max: now, time: { unit: "day", displayFormats: { day: "dd/MM" } },
+                  ticks: { autoSkip: true, maxTicksLimit: 8, font: { size: 13 } }, grid: { display: false } },
+            y:  { position: "left",  title: { display: true, text: "energía del mar" }, beginAtZero: true,
+                  grid: { color: "rgba(128,128,128,0.1)" }, ticks: { font: { size: 13 } } },
+            y1: { position: "right", title: { display: true, text: "viento (km/h)" }, beginAtZero: true,
+                  grid: { display: false }, ticks: { font: { size: 13 } } },
+            yMark: { display: false, min: 0, max: 1 },
+          },
+        },
+      };
+      if (anTimelineChart) { anTimelineChart.data = cfg.data; anTimelineChart.options = cfg.options; anTimelineChart.update("none"); }
+      else anTimelineChart = new Chart(document.getElementById("anTimelineChart"), cfg);
+    }
+
+    // ── alertas por estado de mar ──
+    const seaCfg = {
+      type: "bar",
+      data: { labels: ["Mar bueno", "Mar no apto", "Sin dato"], datasets: [
+        { data: [good, bad, unk], backgroundColor: ["#e0892b", "#3d7a52", "rgba(150,180,195,0.28)"], borderWidth: 0, maxBarThickness: 80 },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 14 } } },
+          y: { beginAtZero: true, title: { display: true, text: "n° alertas" },
+               ticks: { precision: 0, font: { size: 13 } }, grid: { color: "rgba(128,128,128,0.1)" } },
+        },
+      },
+    };
+    if (anSeaChart) { anSeaChart.data = seaCfg.data; anSeaChart.options = seaCfg.options; anSeaChart.update("none"); }
+    else anSeaChart = new Chart(document.getElementById("anSeaChart"), seaCfg);
+
+    // ── NDSI vs click rate (correlación, punto por punto) ──
+    // Cada muestra de la timeline acústica que tenga ambos valores = un punto.
+    const ndsiClickPts = (acoustic && acoustic.timeline ? acoustic.timeline : [])
+      .filter(p => p.ndsi != null && p.click != null)
+      .map(p => ({ x: p.ndsi, y: p.click, _ts: p.ts }));
+    const ndsiClickCfg = {
+      type: "scatter",
+      data: { datasets: [
+        { label: "muestra", data: ndsiClickPts, backgroundColor: "rgba(29,158,117,0.55)",
+          borderColor: "#1d9e75", pointRadius: 3.5, pointHoverRadius: 5 },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: {
+            title: items => items.length && items[0].raw._ts
+              ? new Date(items[0].raw._ts).toLocaleString("es-CL", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "",
+            label: ctx => `NDSI ${ctx.parsed.x.toFixed(2)} · ${ctx.parsed.y.toFixed(1)} clicks/s`,
+          } },
+        },
+        scales: {
+          x: { min: -1, max: 1, title: { display: true, text: "NDSI" },
+               grid: { color: "rgba(128,128,128,0.1)" }, ticks: { font: { size: 13 } } },
+          y: { beginAtZero: true, title: { display: true, text: "click rate (Hz)" },
+               grid: { color: "rgba(128,128,128,0.1)" }, ticks: { font: { size: 13 } } },
+        },
+      },
+    };
+    if (anNdsiClickChart) { anNdsiClickChart.data = ndsiClickCfg.data; anNdsiClickChart.options = ndsiClickCfg.options; anNdsiClickChart.update("none"); }
+    else anNdsiClickChart = new Chart(document.getElementById("anNdsiClickChart"), ndsiClickCfg);
+
+    // ── click rate vs energía del mar en el tiempo ──
+    // energía del mar ∝ altura² × período (proxy multiplicativo del flujo de energía de olas).
+    const clickTs  = (acoustic && acoustic.timeline ? acoustic.timeline : [])
+      .filter(p => p.click != null).map(p => ({ x: new Date(p.ts), y: p.click }));
+    const energyTs = oh.filter(p => p.t <= now).map(p => ({ x: new Date(p.t), y: seaEnergy(p.swell_m, p.swell_period_s) }))
+      .filter(p => p.y != null);
+    const energyCfg = {
+      type: "line",
+      data: { datasets: [
+        { label: "Tasa de clicks (Hz)", data: clickTs, borderColor: "#d85a30", backgroundColor: "#d85a30",
+          borderWidth: 1.9, pointRadius: 0, tension: 0.25, yAxisID: "y", spanGaps: true },
+        { label: "Energía del mar (swell²·período)", data: energyTs, borderColor: "#1d6fa5", backgroundColor: "#1d6fa5",
+          borderWidth: 1.6, pointRadius: 0, tension: 0.25, yAxisID: "y1", borderDash: [4, 3], spanGaps: true },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { intersect: false, mode: "index" },
+        plugins: {
+          legend: { display: true, labels: { boxWidth: 12, font: { size: 14 } } },
+          tooltip: { callbacks: { title: items => items.length ? new Date(items[0].parsed.x).toLocaleString("es-CL", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "" } },
+        },
+        scales: {
+          x:  { type: "time", min: winStart, max: now, time: { unit: "day", displayFormats: { day: "dd/MM" } },
+                ticks: { autoSkip: true, maxTicksLimit: 8, font: { size: 13 } }, grid: { display: false } },
+          y:  { position: "left",  beginAtZero: true, title: { display: true, text: "click rate (Hz)" },
+                grid: { color: "rgba(128,128,128,0.1)" }, ticks: { font: { size: 13 } } },
+          y1: { position: "right", beginAtZero: true, title: { display: true, text: "energía del mar" },
+                grid: { display: false }, ticks: { font: { size: 13 } } },
+        },
+      },
+    };
+    if (anEnergyChart) { anEnergyChart.data = energyCfg.data; anEnergyChart.options = energyCfg.options; anEnergyChart.update("none"); }
+    else anEnergyChart = new Chart(document.getElementById("anEnergyChart"), energyCfg);
+  }
+
+  async function loadPowerHistory() {
+    const powerCard = document.getElementById("power-card");
+    let data;
+    try {
+      const res = await fetch(dataUrl("power_history.json") + "?t=" + Date.now());
+      if (!res.ok) throw 0;
+      data = await res.json();
+    } catch (_) {
+      if (powerCard) powerCard.style.display = "none";   // sin histórico → no mostrar la tarjeta
+      return;
+    }
+    const points = (data.history || []);
+
+    // Los timestamps alimentan la barra de actividad del sensor aunque no haya datos de
+    // energía (sobrevive reboots/crashes), así que esto va SIEMPRE, antes de cualquier salida.
+    powerHistoryTimes = points.map(p => new Date(p.ts).getTime());
+    renderUptimeBar();
+
+    // ¿Hay algún valor real? Los sitios a red eléctrica (sin Victron) traen todo en null.
+    const hasPower = points.some(p => p.sys_w != null || p.panel_w != null || p.bat_v != null);
+    if (powerCard) powerCard.style.display = hasPower ? "" : "none";
+    if (!hasPower) return;
+
+    clearLoading("tab-sensor");   // quita el skeleton del gráfico de energía
+    document.getElementById("power-history-empty").style.display = "none";
+    document.getElementById("powerHistoryChart").style.display    = "";
+
+    const labels = points.map(p => new Date(p.ts));
+    const sys    = points.map(p => p.sys_w);
+    const panel  = points.map(p => p.panel_w);
+    const bat    = points.map(p => p.bat_v);
+
+    const cfg = {
+      type: "line",
+      data: { labels, datasets: [
+        { label: "Panel (W)",   data: panel, borderColor: "#f0997b", backgroundColor: "rgba(240,153,123,0.30)",
+          borderWidth: 1, pointRadius: 0, fill: "origin", tension: 0.3, yAxisID: "y" },
+        { label: "Consumo (W)", data: sys,   borderColor: "#d85a30", backgroundColor: "#d85a30",
+          borderWidth: 1.5, pointRadius: 0, tension: 0.2, yAxisID: "y" },
+        { label: "Batería (V)", data: bat,   borderColor: "#185fa5", backgroundColor: "#185fa5",
+          borderWidth: 2, pointRadius: 0, tension: 0.2, yAxisID: "y1", borderDash: [3,3] },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { intersect: false, mode: "index" },
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { type: "time", time: { unit: "hour", displayFormats: { hour: "dd/MM HH:mm" } },
+               ticks: { autoSkip: true, maxTicksLimit: 8, font: { size: 13 } }, grid: { display: false } },
+          y:  { position: "left",  title: { display: true, text: "W" }, beginAtZero: true,
+                grid: { color: "rgba(128,128,128,0.1)" }, ticks: { font: { size: 13 } } },
+          y1: { position: "right", title: { display: true, text: "V" }, min: 11.5, max: 14.0,
+                grid: { display: false }, ticks: { font: { size: 13 } } },
+        },
+      },
+    };
+    if (powerChart) {
+      powerChart.data = cfg.data;
+      powerChart.options.scales = cfg.options.scales;
+      powerChart.update("none");
+    } else {
+      powerChart = new Chart(document.getElementById("powerHistoryChart"), cfg);
+    }
+  }
+
+  function renderStatus(s) {
+    const now       = Date.now();
+    const lastSeen  = new Date(s.last_seen);
+    const isOnline  = (now - lastSeen.getTime()) < STATUS_STALE_MS;
+
+    // Header pill (con frescura del dato)
+    setGlobalPill(isOnline, lastSeen.getTime());
+
+    // Nota de refresco
+    clearLoading("tab-sensor");
+    document.getElementById("status-refresh-note").textContent =
+      `Última actualización del sensor: ${formatTs(s.last_seen)}${isOnline ? "" : " · posiblemente offline"}`;
+
+    // Estado online/offline
+    const badge = document.getElementById("sc-status");
+    badge.innerHTML = `<span class="online-badge${isOnline ? "" : " offline"}">
+      <span class="online-dot"></span>${isOnline ? "En línea" : "Offline"}
+    </span>`;
+    document.getElementById("sc-last-seen").textContent = "Última vez visto: " + formatTs(s.last_seen);
+
+    // Uptime
+    const uptimeSecs = s.uptime_seconds || 0;
+    document.getElementById("sc-uptime").textContent = formatUptime(uptimeSecs);
+    document.getElementById("sc-session-start").textContent =
+      "Inicio de sesión: " + formatTs(s.session_start);
+    // Barra de uptime: 100% si >= 24h, relativa a 24h
+    const uptimePct = Math.min(uptimeSecs / 86400 * 100, 100);
+    document.getElementById("sc-uptime-bar").style.width = uptimePct + "%";
+
+    // Métricas — alertas de la sesión actual contadas con el threshold del slider
+    // (no las cuenta del Pi, que usan threshold del modelo 0.5 → false positives del ruido)
+    const sessionStartMs = s.session_start ? new Date(s.session_start).getTime() : 0;
+    const minConf = parseInt(document.getElementById("confidence-slider").value, 10) / 100;
+    const sessionAlertCount = allAlerts.filter(a =>
+      new Date(a.timestamp).getTime() >= sessionStartMs &&
+      (a.model_proba ?? 0) >= minConf
+    ).length;
+    document.getElementById("sc-alert-count").textContent = sessionAlertCount;
+    document.getElementById("sc-threshold").textContent   =
+      s.current_threshold != null ? s.current_threshold.toFixed(3) : "—";
+    document.getElementById("sc-cooldown").textContent    =
+      s.current_cooldown  != null ? s.current_cooldown + " s" : "—";
+    document.getElementById("sc-last-rms").textContent    =
+      s.last_rms != null ? s.last_rms.toFixed(4) : "—";
+    document.getElementById("sc-sw-version").textContent  = s.software_version || "—";
+    document.getElementById("sc-device-id").textContent   = "Dispositivo: " + (s.device || "—");
+
+    // Conectividad y captura
+    // Señal celular: preferimos "X/5 ▮ 4G" si tenemos signal_bars, si no caemos a dBm, si no N/A
+    const NETWORK_LABELS = {
+      "NR":"5G", "NR5G":"5G", "ENDC":"5G NSA", "ENDC_NR5G":"5G NSA",
+      "LTE":"4G", "LTE+":"4G+", "LTE-A":"4G+", "LTE-CA":"4G+",
+      "WCDMA":"3G", "HSPA":"3G", "HSPA+":"3G+", "UMTS":"3G", "TD-SCDMA":"3G",
+      "GSM":"2G", "GPRS":"2G", "EDGE":"2G",
+    };
+    const friendlyNet = (raw) => raw ? (NETWORK_LABELS[raw.toUpperCase()] || raw) : "";
+    let rssiText = "N/A";
+    if (s.signal_bars != null) {
+      const bars = Math.max(0, Math.min(5, s.signal_bars));
+      const filled = "▮".repeat(bars);
+      const empty  = "▯".repeat(5 - bars);
+      const net    = friendlyNet(s.network_type);
+      const netStr = net ? " · " + net : "";
+      const dbm    = s.signal_rssi != null ? " (~" + s.signal_rssi + " dBm)" : "";
+      rssiText     = filled + empty + " " + bars + "/5" + netStr + dbm;
+    } else if (s.signal_rssi != null) {
+      rssiText = s.signal_rssi + " dBm";
+    }
+    // Señal: el sensor de Zapallar se conecta por WiFi. Si hay datos celulares (modem) se muestran.
+    const sigEl = document.getElementById("sc-rssi");
+    const sigSub = document.getElementById("sc-signal-sub");
+    if (s.signal_bars != null || s.signal_rssi != null) {
+      sigEl.textContent = rssiText; sigEl.classList.remove("na");
+      sigSub.textContent = "señal celular (modem)";
+    } else if (isOnline) {
+      sigEl.textContent = "WiFi"; sigEl.classList.remove("na");
+      sigSub.textContent = "conectado por WiFi";
+    } else {
+      sigEl.textContent = "—"; sigEl.classList.add("na");
+      sigSub.textContent = "sin conexión";
+    }
+    // El hidrófono es un Aquarian A5 (el status reporta el device ALSA, no el modelo)
+    document.getElementById("sc-audio-device").textContent = s.audio_device ? "Aquarian A5" : "—";
+    document.getElementById("sc-sample-rate").textContent  = s.sample_rate ? s.sample_rate + " Hz" : "—";
+
+    // Energía solar (Victron BlueSolar) — la tarjeta se oculta si no hay ningún dato
+    const hasSolar = [s.battery_voltage_v, s.battery_current_a, s.panel_power_w, s.panel_voltage_v,
+                      s.charge_state, s.yield_today_kwh, s.system_load_w].some(v => v != null);
+    const solarCard = document.getElementById("solar-card");
+    if (solarCard) solarCard.style.display = hasSolar ? "" : "none";
+    // (el bloque solar de abajo igual corre; si no hay datos la tarjeta va oculta)
+    const battV = document.getElementById("sc-batt-v");
+    const battSub = document.getElementById("sc-batt-sub");
+    if (s.battery_voltage_v != null) {
+      battV.textContent = s.battery_voltage_v.toFixed(2) + " V";
+      battV.classList.remove("na");
+      if (s.battery_current_a != null) {
+        const i = s.battery_current_a;
+        const arrow = i > 0.05 ? "↑ cargando" : (i < -0.05 ? "↓ descargando" : "en reposo");
+        battSub.textContent = Math.abs(i).toFixed(2) + " A · " + arrow;
+      } else {
+        battSub.textContent = "voltaje de batería";
+      }
+    } else {
+      battV.textContent = "—"; battSub.textContent = "cable VE.Direct no conectado";
+    }
+
+    const panelW = document.getElementById("sc-panel-w");
+    const panelSub = document.getElementById("sc-panel-sub");
+    if (s.panel_power_w != null) {
+      panelW.textContent = s.panel_power_w + " W";
+      panelW.classList.remove("na");
+      if (s.panel_voltage_v != null) {
+        panelSub.textContent = s.panel_voltage_v.toFixed(1) + " V" + (s.max_power_today_w != null ? " · pico hoy " + s.max_power_today_w + " W" : "");
+      }
+    } else {
+      panelW.textContent = "—"; panelSub.textContent = "panel solar no detectado";
+    }
+
+    const chargeEl = document.getElementById("sc-charge-state");
+    const chargeSub = document.getElementById("sc-charge-sub");
+    if (s.charge_state) {
+      // color hint: Bulk/Absorption/Float = healthy; Fault/Off = problema
+      chargeEl.textContent = s.charge_state;
+      chargeEl.classList.remove("na");
+      if (s.charge_state_id === 2) chargeSub.textContent = "fallo del controlador";
+      else if (s.charge_state_id === 0) chargeSub.textContent = "sin energía solar";
+      else chargeSub.textContent = "cargando batería";
+    } else {
+      chargeEl.textContent = "—"; chargeSub.textContent = "modo MPPT";
+    }
+
+    const yieldEl = document.getElementById("sc-yield-today");
+    const yieldSub = document.getElementById("sc-yield-sub");
+    if (s.yield_today_kwh != null) {
+      yieldEl.textContent = Math.round(s.yield_today_kwh * 1000) + " Wh";
+      yieldEl.classList.remove("na");
+      yieldSub.textContent = s.yield_total_kwh != null ? "total: " + Math.round(s.yield_total_kwh * 1000) + " Wh" : "energía hoy";
+    } else {
+      yieldEl.textContent = "—"; yieldSub.textContent = "sin datos";
+    }
+
+    // Consumo del sistema (W) — derivado del Victron
+    const loadEl = document.getElementById("sc-load-w");
+    const loadSub = document.getElementById("sc-load-sub");
+    if (s.system_load_w != null) {
+      loadEl.textContent = s.system_load_w.toFixed(1) + " W";
+      loadEl.classList.remove("na");
+      // Estimación diaria: load_w × 24h = Wh/día
+      const wh_day = Math.round(s.system_load_w * 24);
+      loadSub.textContent = `~${wh_day} Wh/día estimado`;
+    } else {
+      loadEl.textContent = "—";
+      loadSub.textContent = "requiere cable VE.Direct conectado";
+    }
+
+    // Sistema (CPU temp, SD, RAM, uptime sistema)
+    const fmtUptime = (secs) => {
+      if (secs == null) return "—";
+      const s = Math.floor(secs);
+      const d = Math.floor(s / 86400);
+      const h = Math.floor((s % 86400) / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      return d > 0 ? `${d}d ${h}h ${m}m` : `${h}h ${m}m`;
+    };
+    const cpuEl  = document.getElementById("sc-cpu-temp");
+    const cpuSub = document.getElementById("sc-cpu-temp-sub");
+    if (s.cpu_temp_c != null) {
+      cpuEl.textContent = s.cpu_temp_c + " °C";
+      cpuEl.classList.remove("na");
+      // Color hint: >70°C warm, >80°C hot
+      cpuSub.textContent = s.cpu_temp_c >= 80 ? "alto (throttling cerca)"
+                         : s.cpu_temp_c >= 70 ? "ligeramente caliente"
+                         : "normal";
+    } else {
+      cpuEl.textContent = "—"; cpuSub.textContent = "sensor interno del SoC";
+    }
+
+    const diskEl  = document.getElementById("sc-disk");
+    const diskSub = document.getElementById("sc-disk-sub");
+    if (s.disk_used_pct != null) {
+      diskEl.textContent = s.disk_used_pct + "%";
+      if (s.disk_free_gb != null && s.disk_total_gb != null) {
+        diskSub.textContent = `${s.disk_free_gb.toFixed(1)} / ${s.disk_total_gb.toFixed(0)} GB libres`;
+      }
+    } else {
+      diskEl.textContent = "—";
+    }
+
+    // RAM: si el sensor reporta MB, mostrar "462 MB / 3.7 GB (14%)"; si no, solo el %.
+    const ramEl = document.getElementById("sc-ram");
+    if (s.ram_used_mb != null && s.ram_total_mb != null) {
+      ramEl.textContent = `${s.ram_used_mb} MB / ${(s.ram_total_mb / 1024).toFixed(1)} GB` +
+        (s.ram_used_pct != null ? ` (${s.ram_used_pct}%)` : "");
+    } else {
+      ramEl.textContent = s.ram_used_pct != null ? s.ram_used_pct + "%" : "—";
+    }
+    document.getElementById("sc-sysup").textContent = fmtUptime(s.system_uptime_s);
+
+    // Guardar último status y refrescar barra de uptime
+    lastStatus = s;
+    renderUptimeBar();
+  }
+
+  function formatHW(a, b) {
+    if (a && b) return a + " / " + b;
+    if (a) return a;
+    if (b) return b;
+    return "N/A";
+  }
+
+  function relTime(ms) {
+    if (ms == null) return "";
+    const s = Math.max(0, (Date.now() - ms) / 1000);
+    if (s < 90)     return "hace " + Math.round(s) + " s";
+    if (s < 5400)   return "hace " + Math.round(s / 60) + " min";
+    if (s < 172800) return "hace " + Math.round(s / 3600) + " h";
+    return "hace " + Math.round(s / 86400) + " d";
+  }
+  function setGlobalPill(online, lastSeenMs) {
+    const pill = document.getElementById("global-status-pill");
+    const txt  = document.getElementById("global-status-text");
+    const rel  = lastSeenMs != null ? " · visto " + relTime(lastSeenMs) : "";
+    if (online) {
+      pill.classList.remove("offline");
+      txt.textContent = "En línea" + rel;
+    } else {
+      pill.classList.add("offline");
+      txt.textContent = "Sin señal" + rel;
+    }
+  }
+
+  /** El pill del header debe reflejar el estado real desde el arranque y en cualquier
+   *  pestaña (antes solo se actualizaba al abrir "Estado del Sensor"). */
+  async function refreshGlobalPill() {
+    try {
+      const r = await fetch(dataUrl("status.json") + "?t=" + Date.now());
+      if (!r.ok) throw 0;
+      const s = await r.json();
+      const lsMs = new Date(s.last_seen).getTime();
+      setGlobalPill((Date.now() - lsMs) < STATUS_STALE_MS, lsMs);
+    } catch (_) {
+      setGlobalPill(false);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BARRA DE UPTIME/DOWNTIME
+  // ─────────────────────────────────────────────────────────────────────────────
+  function setUptimeScale(scale, btn) {
+    currentScale = scale;
+    document.querySelectorAll(".scale-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    renderUptimeBar();
+  }
+
+  function renderUptimeBar() {
+    const container = document.getElementById("uptime-timeline");
+    const tooltip   = document.getElementById("uptime-tooltip");
+    if (!container) return;
+
+    // Configuración según escala
+    const now = Date.now();
+    let bucketCount, bucketMs, labelFmt;
+    if (currentScale === "6h") {
+      bucketCount = 24; bucketMs = 15 * 60 * 1000;
+      labelFmt = d => d.toLocaleTimeString("es-CL", { hour:"2-digit", minute:"2-digit" });
+    } else if (currentScale === "24h") {
+      bucketCount = 24; bucketMs = 60 * 60 * 1000;
+      labelFmt = d => d.toLocaleTimeString("es-CL", { hour:"2-digit", minute:"2-digit" });
+    } else if (currentScale === "7d") {
+      bucketCount = 28; bucketMs = 6 * 60 * 60 * 1000;
+      labelFmt = d => d.toLocaleDateString("es-CL", { day:"2-digit", month:"2-digit" }) + " " +
+                      d.toLocaleTimeString("es-CL", { hour:"2-digit" }) + "h";
+    } else { // 30d
+      bucketCount = 30; bucketMs = 24 * 60 * 60 * 1000;
+      labelFmt = d => d.toLocaleDateString("es-CL", { day:"2-digit", month:"2-digit" });
+    }
+
+    const totalMs   = bucketCount * bucketMs;
+    const startTime = now - totalMs;
+
+    // Ventana de sesión del sensor
+    let sessionStart = null, sessionEnd = null;
+    if (lastStatus) {
+      sessionStart = new Date(lastStatus.session_start).getTime();
+      sessionEnd   = new Date(lastStatus.last_seen).getTime();
+    }
+
+    // Timestamps de alertas que pasan el slider de confianza (no las dudosas/ruido)
+    const minConfBar = parseInt(document.getElementById("confidence-slider").value, 10) / 100;
+    const alertTimes = allAlerts
+      .filter(a => (a.model_proba ?? 0) >= minConfBar)
+      .map(a => new Date(a.timestamp).getTime());
+
+    // Construir celdas
+    const cells = [];
+    for (let i = 0; i < bucketCount; i++) {
+      const bStart  = startTime + i * bucketMs;
+      const bEnd    = bStart + bucketMs;
+      const isFuture = bStart > now;
+
+      let state = "empty";
+      if (!isFuture) {
+        const hasAlert = alertTimes.some(t => t >= bStart && t < bEnd);
+        if (hasAlert) {
+          state = "active";
+        } else {
+          // Sesión actual del oceankind
+          let online = false;
+          if (sessionStart && sessionEnd) {
+            online = bEnd > sessionStart && bStart < sessionEnd;
+          }
+          // Power history (sobrevive reboots/restarts del servicio — más fiable)
+          if (!online && powerHistoryTimes.length) {
+            online = powerHistoryTimes.some(t => t >= bStart && t < bEnd);
+          }
+          if (online) state = "session";
+        }
+      } else {
+        state = "future";
+      }
+      cells.push({ bStart, bEnd, state });
+    }
+
+    // Porcentaje activo
+    const validCells  = cells.filter(c => c.state !== "future");
+    const activeCells = cells.filter(c => c.state === "active" || c.state === "session");
+    const pct = validCells.length > 0 ? Math.round(activeCells.length / validCells.length * 100) : 0;
+
+    document.getElementById("uptime-pct").textContent       = pct + "%";
+    document.getElementById("uptime-label-start").textContent = labelFmt(new Date(startTime));
+    document.getElementById("uptime-pct-range").textContent = "en las últimas " + currentScale;
+
+    // Renderizar celdas
+    container.innerHTML = "";
+    cells.forEach(cell => {
+      const div = document.createElement("div");
+      div.className = "uptime-cell " + cell.state;
+
+      div.addEventListener("mouseenter", () => {
+        const d1 = labelFmt(new Date(cell.bStart));
+        const d2 = labelFmt(new Date(cell.bEnd));
+        const label = cell.state === "active"  ? "Con alertas"           :
+                      cell.state === "session" ? "Online (sin alertas)"  :
+                      cell.state === "future"  ? "—"                        :
+                                                 "Sin datos";
+        tooltip.innerHTML = `<strong>${d1} – ${d2}</strong><br>${label}`;
+        tooltip.style.display = "block";
+      });
+      div.addEventListener("mousemove", e => {
+        tooltip.style.left = (e.clientX + 14) + "px";
+        tooltip.style.top  = (e.clientY - 48) + "px";
+      });
+      div.addEventListener("mouseleave", () => {
+        tooltip.style.display = "none";
+      });
+      container.appendChild(div);
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Helpers
+  // ─────────────────────────────────────────────────────────────────────────────
+  function formatTs(iso) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleString("es-CL", {
+      day:"2-digit", month:"2-digit", year:"numeric",
+      hour:"2-digit", minute:"2-digit", second:"2-digit"
+    });
+  }
+
+  function formatUptime(secs) {
+    if (!secs) return "0 s";
+    const d = Math.floor(secs / 86400);
+    const h = Math.floor((secs % 86400) / 3600);
+    const m = Math.floor((secs % 3600)  / 60);
+    const s = secs % 60;
+    if (d > 0) return `${d}d ${h}h ${m}m`;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+
+  function resetZoom() { if (chartInstance) chartInstance.resetZoom(); }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MAPA — Leaflet
+  // ─────────────────────────────────────────────────────────────────────────────
+  let mapInstance    = null;
+  let sensorMarker   = null;
+  let alertMarkers   = [];
+
+  function initMap(lat, lon, locationName) {
+    if (mapInstance) {
+      mapInstance.setView([lat, lon], 13);
+      if (sensorMarker) sensorMarker.setLatLng([lat, lon]);
+      refreshAlertMarkers();
+      return;
+    }
+
+    mapInstance = L.map("sensor-map").setView([lat, lon], 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+      maxZoom: 18,
+    }).addTo(mapInstance);
+
+    // Marcador del sensor
+    const sensorIcon = L.divIcon({
+      className: "",
+      html: `<div style="
+        width:18px;height:18px;border-radius:50%;
+        background:#64B1C5;border:3px solid white;
+        box-shadow:0 2px 8px rgba(0,0,0,.4);
+      "></div>`,
+      iconSize: [18, 18], iconAnchor: [9, 9],
+    });
+    sensorMarker = L.marker([lat, lon], { icon: sensorIcon })
+      .addTo(mapInstance)
+      .bindPopup(`<strong>${locationName}</strong><br>${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+
+    refreshAlertMarkers();
+  }
+
+  function refreshAlertMarkers() {
+    if (!mapInstance) return;
+    alertMarkers.forEach(m => m.remove());
+    alertMarkers = [];
+
+    // Solo alertas con audio (las que tienen coordenadas del mismo sensor)
+    const recent = allAlerts.slice(0, 50);
+    recent.forEach(a => {
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="
+          width:10px;height:10px;border-radius:50%;
+          background:${a.audio_level > 0.15 ? "#e03e52" : "#f59e0b"};
+          border:2px solid white;
+          box-shadow:0 1px 4px rgba(0,0,0,.3);
+          opacity:.85;
+        "></div>`,
+        iconSize: [10, 10], iconAnchor: [5, 5],
+      });
+      // Todas las alertas son del mismo sensor por ahora
+      const lat = lastStatus?.lat ?? -33.986582;
+      const lon = lastStatus?.lon ?? -71.860006;
+      const m = L.marker([lat, lon], { icon })
+        .addTo(mapInstance)
+        .bindPopup(`
+          <strong>${formatTs(a.timestamp)}</strong><br>
+          Nivel: ${a.audio_level.toFixed(4)}<br>
+          Pico: ${a.peak_db} dB<br>
+          Dispositivo: ${a.device || "—"}
+        `);
+      alertMarkers.push(m);
+    });
+
+    document.getElementById("map-alert-count").textContent =
+      `Mostrando las últimas ${recent.length} alertas en el mapa.`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ESPECTROGRAMA — FFT Cooley-Tukey + visualización de mapa de color
+  // ─────────────────────────────────────────────────────────────────────────────
+  const BLOB_BASE = OK_DATA_BASE;
+  let audioCtx = null;
+
+  /** FFT in-place (Cooley-Tukey, potencia de 2). re e im son Float32Array. */
+  function fft(re, im) {
+    const n = re.length;
+    // Bit-reversal permutation
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        let tmp = re[i]; re[i] = re[j]; re[j] = tmp;
+            tmp = im[i]; im[i] = im[j]; im[j] = tmp;
+      }
+    }
+    // Butterfly passes
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = -2 * Math.PI / len;
+      const wr0 = Math.cos(ang), wi0 = Math.sin(ang);
+      for (let i = 0; i < n; i += len) {
+        let wr = 1, wi = 0;
+        const half = len >> 1;
+        for (let j = 0; j < half; j++) {
+          const ur = re[i+j],       ui = im[i+j];
+          const vr = re[i+j+half] * wr - im[i+j+half] * wi;
+          const vi = re[i+j+half] * wi + im[i+j+half] * wr;
+          re[i+j]      = ur + vr;  im[i+j]      = ui + vi;
+          re[i+j+half] = ur - vr;  im[i+j+half] = ui - vi;
+          const nwr = wr * wr0 - wi * wi0;
+          wi = wr * wi0 + wi * wr0; wr = nwr;
+        }
+      }
+    }
+  }
+
+  /** Abre el modal de espectrograma. alert puede ser un objeto {audio_url, …}
+   *  o directamente el nombre del blob (string). */
+  async function openSpectrogram(alertOrBlob) {
+    let audioUrl, tsTitle, alertMeta;
+    if (typeof alertOrBlob === "string") {
+      audioUrl  = BLOB_BASE + alertOrBlob;
+      tsTitle   = alertOrBlob;
+      alertMeta = null;
+    } else {
+      if (!alertOrBlob?.audio_url) return;
+      audioUrl  = alertOrBlob.audio_url;
+      tsTitle   = formatTs(alertOrBlob.timestamp);
+      alertMeta = alertOrBlob;
+    }
+
+    const modal = document.getElementById("spectrogram-modal");
+    modal.classList.add("visible");
+    document.getElementById("spec-loading").style.display = "block";
+    document.getElementById("spec-loading").textContent   = "Cargando audio...";
+    document.getElementById("spec-canvas").style.display  = "none";
+    document.getElementById("spec-audio-wrap").style.display = "none";
+    document.getElementById("spec-title").textContent = "Espectrograma — " + tsTitle;
+    document.getElementById("spec-meta").textContent = "";
+
+    try {
+      const resp = await fetch(audioUrl);
+      if (!resp.ok) throw new Error("No se pudo cargar el audio (HTTP " + resp.status + ")");
+      const arrayBuf = await resp.arrayBuffer();
+
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const audioBuf = await audioCtx.decodeAudioData(arrayBuf.slice(0));
+
+      document.getElementById("spec-loading").textContent = "Calculando espectrograma...";
+      // Defer to next tick so the browser paints the message first
+      await new Promise(r => setTimeout(r, 0));
+      drawSpectrogram(audioBuf);
+
+      // Reproductor
+      const blob = new Blob([arrayBuf], { type: "audio/wav" });
+      document.getElementById("spec-audio").src = URL.createObjectURL(blob);
+      document.getElementById("spec-audio-wrap").style.display = "block";
+
+      let metaStr = `Duración: ${audioBuf.duration.toFixed(2)}s · ${audioBuf.sampleRate} Hz`;
+      if (alertMeta) metaStr += ` · RMS: ${alertMeta.audio_level?.toFixed(4)} · Pico: ${alertMeta.peak_db} dB`;
+      document.getElementById("spec-meta").textContent = metaStr;
+
+    } catch(e) {
+      document.getElementById("spec-loading").textContent = "Error: " + e.message;
+    }
+  }
+
+  // Colormap magma (matplotlib/librosa) — 12 anclas, interpolación lineal
+  const MAGMA = [[0,0,4],[24,12,60],[66,10,104],[106,23,110],[147,38,103],[188,55,84],
+                 [223,81,58],[243,120,38],[250,167,55],[249,213,104],[252,253,169],[252,253,191]];
+  function magmaColor(v) {
+    v = Math.max(0, Math.min(1, v));
+    const x = v * (MAGMA.length - 1), i = Math.floor(x), t = x - i;
+    const a = MAGMA[i], b = MAGMA[Math.min(MAGMA.length - 1, i + 1)];
+    return [Math.round(a[0]+(b[0]-a[0])*t), Math.round(a[1]+(b[1]-a[1])*t), Math.round(a[2]+(b[2]-a[2])*t)];
+  }
+
+  // Mel-espectrograma estilo librosa: colormap magma, eje Y en mel, eje X en tiempo, colorbar en dB.
+  function drawSpectrogram(audioBuf) {
+    const canvas  = document.getElementById("spec-canvas");
+    const fftSize = 1024, hop = 256;
+    const samples = audioBuf.getChannelData(0);
+    const sr = audioBuf.sampleRate, nyq = sr / 2;
+    const numFrames = Math.max(1, Math.floor((samples.length - fftSize) / hop));
+    const numFreqs  = fftSize >> 1;
+
+    // STFT (ventana de Hann) → magnitudes
+    const hann = new Float32Array(fftSize);
+    for (let i = 0; i < fftSize; i++) hann[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / fftSize));
+    const mags = new Array(numFrames);
+    let maxMag = 1e-12;
+    for (let f = 0; f < numFrames; f++) {
+      const start = f * hop;
+      const re = new Float32Array(fftSize), im = new Float32Array(fftSize);
+      for (let i = 0; i < fftSize; i++) re[i] = (start + i < samples.length ? samples[start + i] : 0) * hann[i];
+      fft(re, im);
+      const mag = new Float32Array(numFreqs);
+      for (let k = 0; k < numFreqs; k++) { const m = Math.sqrt(re[k]*re[k] + im[k]*im[k]) / fftSize; mag[k] = m; if (m > maxMag) maxMag = m; }
+      mags[f] = mag;
+    }
+
+    // Layout de la figura (con márgenes para ejes + colorbar)
+    const PAD_L = 60, PAD_R = 92, PAD_T = 14, PAD_B = 44, plotW = 640, plotH = 260;
+    canvas.width  = PAD_L + plotW + PAD_R;
+    canvas.height = PAD_T + plotH + PAD_B;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const hzToMel = hz => 2595 * Math.log10(1 + hz / 700);
+    const melToHz = m  => 700 * (Math.pow(10, m / 2595) - 1);
+    const melMax  = hzToMel(nyq);
+    const FLOOR   = -70;
+
+    // Imagen mel-warpeada (numFrames × plotH) con magma
+    const off = document.createElement("canvas"); off.width = numFrames; off.height = plotH;
+    const octx = off.getContext("2d"); const img = octx.createImageData(numFrames, plotH);
+    for (let yy = 0; yy < plotH; yy++) {
+      const freq = melToHz((1 - (yy + 0.5) / plotH) * melMax);
+      const binF = Math.min(numFreqs - 1, freq / nyq * (numFreqs - 1));
+      const b0 = Math.floor(binF), fr = binF - b0, b1 = Math.min(numFreqs - 1, b0 + 1);
+      for (let f = 0; f < numFrames; f++) {
+        const m = mags[f][b0] * (1 - fr) + mags[f][b1] * fr;
+        const db = 20 * Math.log10(m / maxMag + 1e-12);
+        const v = Math.max(0, Math.min(1, (db - FLOOR) / (0 - FLOOR)));
+        const c = magmaColor(v);
+        const idx = (yy * numFrames + f) * 4;
+        img.data[idx] = c[0]; img.data[idx+1] = c[1]; img.data[idx+2] = c[2]; img.data[idx+3] = 255;
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(off, PAD_L, PAD_T, plotW, plotH);
+    ctx.strokeStyle = "#888"; ctx.lineWidth = 1; ctx.strokeRect(PAD_L, PAD_T, plotW, plotH);
+
+    ctx.fillStyle = "#333"; ctx.font = "12px sans-serif";
+    // Eje Y — frecuencia (mel)
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    [0, 512, 1024, 2048, 4096, 8192, 16384].filter(hz => hz <= nyq).forEach(hz => {
+      const yy = PAD_T + plotH * (1 - hzToMel(hz) / melMax);
+      ctx.strokeStyle = "#888"; ctx.beginPath(); ctx.moveTo(PAD_L - 4, yy); ctx.lineTo(PAD_L, yy); ctx.stroke();
+      ctx.fillText(String(hz), PAD_L - 7, yy);
+    });
+    ctx.save(); ctx.translate(15, PAD_T + plotH / 2); ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillText("Frecuencia (Hz, mel)", 0, 0); ctx.restore();
+
+    // Eje X — tiempo (m:ss)
+    const dur = audioBuf.duration, nT = Math.min(6, Math.max(2, Math.round(dur)));
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    for (let i = 0; i <= nT; i++) {
+      const sec = dur * i / nT, xx = PAD_L + plotW * i / nT;
+      ctx.strokeStyle = "#888"; ctx.beginPath(); ctx.moveTo(xx, PAD_T + plotH); ctx.lineTo(xx, PAD_T + plotH + 4); ctx.stroke();
+      ctx.fillText(`${Math.floor(sec/60)}:${String(Math.floor(sec%60)).padStart(2,"0")}`, xx, PAD_T + plotH + 7);
+    }
+    ctx.fillText("Tiempo (s)", PAD_L + plotW / 2, PAD_T + plotH + 26);
+
+    // Colorbar (dB)
+    const cbX = PAD_L + plotW + 16, cbW = 16;
+    for (let yy = 0; yy < plotH; yy++) {
+      const c = magmaColor(1 - yy / plotH);
+      ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`; ctx.fillRect(cbX, PAD_T + yy, cbW, 1);
+    }
+    ctx.strokeStyle = "#888"; ctx.strokeRect(cbX, PAD_T, cbW, plotH);
+    ctx.fillStyle = "#333"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    for (let db = 0; db >= FLOOR; db -= 10) {
+      const yy = PAD_T + plotH * (1 - (db - FLOOR) / (0 - FLOOR));
+      ctx.fillText(`${db > 0 ? "+" : ""}${db} dB`, cbX + cbW + 5, yy);
+    }
+
+    document.getElementById("spec-loading").style.display = "none";
+    canvas.style.display = "block";
+  }
+
+  function closeSpectrogram() {
+    document.getElementById("spectrogram-modal").classList.remove("visible");
+    const a = document.getElementById("spec-audio");
+    a.pause(); a.src = "";
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Init
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // Manejador de parámetro ?play=<blob_name> para abrir espectrograma directamente
+  // (el link llega desde la alerta de WhatsApp)
+  let _autoPlayHandled = false;
+  function checkAutoPlay() {
+    if (_autoPlayHandled) return;
+    const playParam = new URLSearchParams(window.location.search).get("play");
+    if (!playParam) return;
+    _autoPlayHandled = true;
+    // Buscar en el manifest; si no se encuentra abrir igual por URL directa
+    const blobUrl = BLOB_BASE + playParam;
+    const found   = allAlerts.find(a => a.audio_url === blobUrl);
+    openSpectrogram(found ?? playParam);
+  }
+
+  async function loadData() {
+    try {
+      const res = await fetch(dataUrl("manifest.json") + "?t=" + Date.now());
+      if (!res.ok) throw new Error("manifest.json no encontrado");
+      const data = await res.json();
+      allAlerts = data.alerts || [];
+      refreshDeviceDropdown();
+      applyFilter();
+      checkAutoPlay();   // ← abrir espectrograma si hay ?play= en la URL
+    } catch(e) {
+      document.getElementById("alerts-tbody").innerHTML =
+        `<tr><td colspan="6" class="no-alerts">Sin datos aún. Corre el script para generar alertas.<br>
+        <small style="color:#8aa6b2">${e.message}</small></td></tr>`;
+    }
+  }
+
+  loadData();
+  initPortadaMap();
+  refreshGlobalPill();
+  setInterval(loadData, AUTO_REFRESH_MS);
+  setInterval(refreshGlobalPill, AUTO_REFRESH_MS);
+  setInterval(() => {
+    if (document.getElementById("tab-sensor").classList.contains("active")) loadStatus();
+  }, AUTO_REFRESH_MS);
+</script>
+</body>
+</html>
