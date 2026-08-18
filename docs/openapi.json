@@ -1,6 +1,56 @@
 {
  "components": {
   "schemas": {
+   "DeviceConfigOut": {
+    "properties": {
+     "clamp_notes": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Clamp Notes",
+      "type": "array"
+     },
+     "config": {
+      "additionalProperties": true,
+      "title": "Config",
+      "type": "object"
+     },
+     "device_id": {
+      "title": "Device Id",
+      "type": "string"
+     },
+     "is_default": {
+      "title": "Is Default",
+      "type": "boolean"
+     },
+     "updated_utc": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Updated Utc"
+     },
+     "version": {
+      "title": "Version",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "device_id",
+     "version",
+     "is_default",
+     "updated_utc",
+     "config"
+    ],
+    "title": "DeviceConfigOut",
+    "type": "object"
+   },
    "DeviceCreated": {
     "properties": {
      "active": {
@@ -498,6 +548,101 @@
     ]
    }
   },
+  "/api/admin/devices/{device_pk}/config": {
+   "get": {
+    "operationId": "get_device_config_api_admin_devices__device_pk__config_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "device_pk",
+      "required": true,
+      "schema": {
+       "title": "Device Pk",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DeviceConfigOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Device Config",
+    "tags": [
+     "admin"
+    ]
+   },
+   "put": {
+    "description": "Full replace. Missing fields take defaults; unknown fields are an error,\nbecause a typo'd key that silently tuned nothing is a quiet failure.",
+    "operationId": "put_device_config_api_admin_devices__device_pk__config_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "device_pk",
+      "required": true,
+      "schema": {
+       "title": "Device Pk",
+       "type": "integer"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "title": "Body",
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DeviceConfigOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Put Device Config",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
   "/api/admin/users": {
    "get": {
     "operationId": "list_users_api_admin_users_get",
@@ -734,7 +879,7 @@
   },
   "/api/devices/config": {
    "get": {
-    "description": "Signed and clamped configuration, replacing the unsigned config blob (R-6.2, F-10).\n\nTODO: sign the payload with OCEANKIND_CONFIG_SIGNING_KEY and clamp every value\nto a safe range before returning. Thresholds are the client's to choose; the\nclamping and the signing are ours.",
+    "description": "Signed and clamped configuration, replacing the unsigned config blob (R-6.2, F-10).\n\nThresholds are the client's to choose; the clamping and the signing are ours\n(D-015). Payload, signature scheme and clamp table are DATA-CONTRACT.md's\n\"Device configuration\" section; this implements it and nothing beyond it.",
     "operationId": "device_config_api_devices_config_get",
     "parameters": [
      {

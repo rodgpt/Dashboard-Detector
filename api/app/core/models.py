@@ -37,3 +37,17 @@ class Device(SQLModel, table=True):
     key_hash: str
     active: bool = True
     last_seen: Optional[datetime] = None
+
+
+class DeviceConfig(SQLModel, table=True):
+    """Tuned configuration per device (R-6.2). Absent row = defaults at version 1.
+
+    `version` is monotonic; the device applies only what is newer than what it
+    runs. `config_json` is stored already clamped, so what the panel shows,
+    what gets signed and what status.json later reports are the same numbers.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    device_id: str = Field(index=True, unique=True)      # Device.device_id
+    config_json: str
+    version: int = 2                     # 1 is the implicit defaults version
+    updated_utc: datetime = Field(default_factory=_now)

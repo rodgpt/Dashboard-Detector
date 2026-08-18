@@ -7,6 +7,7 @@ os.environ.update({
     "OCEANKIND_LOCAL_STORAGE_ROOT": tempfile.mkdtemp(),
     "OCEANKIND_DB_URL": f"sqlite:///{tempfile.mktemp()}",
     "OCEANKIND_COOKIE_SECURE": "false",
+    "OCEANKIND_CONFIG_SIGNING_KEY": "test-signing-key-0123456789abcdef",
 })
 
 import pytest
@@ -105,10 +106,10 @@ def test_issued_key_returned_once_and_never_readable_again(admin_client):
     assert "key" not in listed[0] and "key_hash" not in listed[0]
     assert listed[0]["last_seen"] is None
 
-    # the issued key authenticates the device route (501 = auth passed, route stub)
+    # the issued key authenticates the device route
     r = admin_client.get("/api/devices/config",
                          headers={"X-Device-Id": "Rpi_zapallar", "X-Device-Key": key})
-    assert r.status_code == 501
+    assert r.status_code == 200
     # a wrong key does not, and the error does not say which half was wrong
     r = admin_client.get("/api/devices/config",
                          headers={"X-Device-Id": "Rpi_zapallar", "X-Device-Key": "nope"})
@@ -136,3 +137,94 @@ def test_delete_revokes_device(admin_client):
     r = admin_client.get("/api/devices/config",
                          headers={"X-Device-Id": "Rpi_matanzas", "X-Device-Key": key})
     assert r.status_code == 401
+
+
+# ── signed, clamped device configuration (R-6.2, F-10) ───────────────────────
+
+@pytest.fixture(scope="module")
+def cfg_device(admin_client):
+    r = admin_client.post("/api/admin/devices",
+                          json={"device_id": "Rpi_cfg", "site_id": "zapallar"})
+    body = r.json()
+    return {"pk": body["id"], "device_id": body["device_id"], "key": body["key"]}
+
+
+def test_config_defaults_before_first_tune(admin_client, cfg_device):
+    r = admin_client.get(f"/api/admin/devices/{cfg_device['pk']}/config")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["is_default"] is True and body["version"] == 1
+    assert body["config"]["score_min"] == 0.60
+    assert body["config"]["detection_mode"] == "psd"
+
+
+def test_tune_clamps_and_bumps_version(admin_client, cfg_device):
+    # score_min above the 0.95 bound and cooldown below the 10 s bound:
+    # both clamped, both reported, nothing rejected, nothing silently accepted
+    r = admin_client.put(f"/api/admin/devices/{cfg_device['pk']}/config",
+                         json={"score_min": 1.5, "cooldown_s": 3, "psd_threshold_db": 12})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["version"] == 2 and body["is_default"] is False
+    assert body["config"]["score_min"] == 0.95
+    assert body["config"]["cooldown_s"] == 10.0
+    assert body["config"]["psd_threshold_db"] == 12.0
+    assert body["config"]["alert_threshold"] == 0.08      # missing field -> default
+    assert len(body["clamp_notes"]) == 2
+
+
+def test_tune_rejects_what_clamping_must_not_fix(admin_client, cfg_device):
+    pk = cfg_device["pk"]
+    # inverted PSD band: rejected, not clamped
+    assert admin_client.put(f"/api/admin/devices/{pk}/config",
+                            json={"psd_f_min": 1500, "psd_f_max": 120}).status_code == 400
+    # enum typo would disable detection
+    assert admin_client.put(f"/api/admin/devices/{pk}/config",
+                            json={"detection_mode": "pds"}).status_code == 400
+    # a typo'd key that silently tuned nothing is a quiet failure
+    assert admin_client.put(f"/api/admin/devices/{pk}/config",
+                            json={"score_mim": 0.4}).status_code == 400
+    # rejection leaves the stored config untouched
+    assert admin_client.get(f"/api/admin/devices/{pk}/config").json()["version"] == 2
+
+
+def test_signed_payload_verifies_and_carries_tuned_config(cfg_device):
+    from fastapi.testclient import TestClient as _TC
+    from app.services.deviceconfig import sign
+    from app.main import app as _app
+    c = _TC(_app)          # fresh client: no session cookie, credential only
+    r = c.get("/api/devices/config",
+              headers={"X-Device-Id": cfg_device["device_id"], "X-Device-Key": cfg_device["key"]})
+    assert r.status_code == 200
+    p = r.json()
+    assert p["schema_version"] == 2
+    assert p["device_id"] == "Rpi_cfg" and p["site"] == "zapallar"
+    assert p["config_version"] == 2
+    assert p["config"]["score_min"] == 0.95               # the clamped tune, in force
+    assert p["expires_utc"] > p["issued_utc"]
+    # the device-side check: recompute the HMAC over the canonical payload
+    assert p["signature"] == sign(p, "test-signing-key-0123456789abcdef")
+
+
+def test_missing_signing_key_fails_loud_never_unsigned(cfg_device):
+    from app.core.config import settings
+    s = settings()
+    old = s.config_signing_key
+    s.config_signing_key = ""
+    try:
+        from fastapi.testclient import TestClient as _TC
+        from app.main import app as _app
+        r = _TC(_app).get("/api/devices/config",
+                          headers={"X-Device-Id": cfg_device["device_id"],
+                                   "X-Device-Key": cfg_device["key"]})
+        assert r.status_code == 503
+    finally:
+        s.config_signing_key = old
+
+
+def test_config_routes_closed_to_operator(client, cfg_device):
+    client.post("/api/auth/login", json={"email": "op@x.io", "password": "correct-horse-battery"})
+    assert client.get(f"/api/admin/devices/{cfg_device['pk']}/config").status_code == 403
+    assert client.put(f"/api/admin/devices/{cfg_device['pk']}/config",
+                      json={"score_min": 0.1}).status_code == 403
+    client.post("/api/auth/logout")

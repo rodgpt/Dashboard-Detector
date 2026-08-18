@@ -101,7 +101,7 @@ Postgres is a connection string.
 | `GET /api/sites/{id}/clips/{path}` | audio, proxied |
 | `GET/POST/PUT/DELETE /api/admin/users` | user and site-assignment management |
 | `GET/POST/DELETE /api/admin/devices` | device registry. the key appears in the creation response, once |
-| `GET /api/devices/config` | signed device configuration. **not implemented yet** |
+| `GET /api/devices/config` | signed, clamped device configuration. needs `OCEANKIND_CONFIG_SIGNING_KEY` |
 
 Every data route is authenticated and site-scoped. An operator assigned to one site
 receives 403 on another, on every endpoint, and the site does not appear in

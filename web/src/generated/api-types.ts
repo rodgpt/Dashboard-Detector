@@ -43,6 +43,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/devices/{device_pk}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Device Config */
+        get: operations["get_device_config_api_admin_devices__device_pk__config_get"];
+        /**
+         * Put Device Config
+         * @description Full replace. Missing fields take defaults; unknown fields are an error,
+         *     because a typo'd key that silently tuned nothing is a quiet failure.
+         */
+        put: operations["put_device_config_api_admin_devices__device_pk__config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/users": {
         parameters: {
             query?: never;
@@ -157,9 +179,9 @@ export interface paths {
          * Device Config
          * @description Signed and clamped configuration, replacing the unsigned config blob (R-6.2, F-10).
          *
-         *     TODO: sign the payload with OCEANKIND_CONFIG_SIGNING_KEY and clamp every value
-         *     to a safe range before returning. Thresholds are the client's to choose; the
-         *     clamping and the signing are ours.
+         *     Thresholds are the client's to choose; the clamping and the signing are ours
+         *     (D-015). Payload, signature scheme and clamp table are DATA-CONTRACT.md's
+         *     "Device configuration" section; this implements it and nothing beyond it.
          */
         get: operations["device_config_api_devices_config_get"];
         put?: never;
@@ -319,6 +341,26 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** DeviceConfigOut */
+        DeviceConfigOut: {
+            /**
+             * Clamp Notes
+             * @default []
+             */
+            clamp_notes: string[];
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Device Id */
+            device_id: string;
+            /** Is Default */
+            is_default: boolean;
+            /** Updated Utc */
+            updated_utc: string | null;
+            /** Version */
+            version: number;
+        };
         /** DeviceCreated */
         DeviceCreated: {
             /** Active */
@@ -548,6 +590,74 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_device_config_api_admin_devices__device_pk__config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_pk: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceConfigOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_device_config_api_admin_devices__device_pk__config_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_pk: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceConfigOut"];
+                };
             };
             /** @description Validation Error */
             422: {

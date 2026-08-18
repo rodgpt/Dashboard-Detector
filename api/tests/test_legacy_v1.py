@@ -112,7 +112,12 @@ def test_event_ids_are_stable_across_polls(v1):
 
 def test_missing_model_output_becomes_null_not_zero(v1):
     from app.services.events import list_events
-    older = list_events(v1, "zapallar")["items"][-1]
+    from datetime import datetime, timezone
+    # explicit window: the default is "last 7 days from now", and a fixture
+    # entry ageing out of it turned this test red purely by calendar
+    older = list_events(v1, "zapallar",
+                        since=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                        until=datetime(2026, 8, 13, tzinfo=timezone.utc))["items"][-1]
     assert older["score"] is None              # null is absence. zero is a reading
     assert older["clip"]["path"] is None
     assert older["clip"]["uploaded"] is False

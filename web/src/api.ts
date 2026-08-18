@@ -66,6 +66,20 @@ export interface AdminDevice { id: number; device_id: string; site_id: string;
 /** `key` exists in the creation response only. It is never readable again (D-017). */
 export interface AdminDeviceCreated extends AdminDevice { key: string; }
 
+/** Mirrors the clamp table in DATA-CONTRACT.md "Device configuration" (R-6.2). */
+export interface DeviceConfig {
+  detection_mode: "psd" | "rms" | "auto";
+  score_min: number; alert_min_rms: number; alert_threshold: number;
+  psd_threshold_db: number; psd_f_min: number; psd_f_max: number;
+  cooldown_s: number; heartbeat_interval_s: number;
+}
+
+export interface DeviceConfigState {
+  device_id: string; version: number; is_default: boolean;
+  updated_utc: string | null; config: DeviceConfig;
+  clamp_notes: string[];        // values the server bounded, in words
+}
+
 // ── calls ───────────────────────────────────────────────────────────────────
 
 export const auth = {
@@ -122,4 +136,10 @@ export const admin = {
                   req<AdminDeviceCreated>("/admin/devices", { method: "POST",
                     headers: { "content-type": "application/json" }, body: JSON.stringify(b) }),
   deleteDevice: (id: number) => req<void>(`/admin/devices/${id}`, { method: "DELETE" }),
+
+  getDeviceConfig: (id: number) => req<DeviceConfigState>(`/admin/devices/${id}/config`),
+  setDeviceConfig: (id: number, config: DeviceConfig) =>
+                     req<DeviceConfigState>(`/admin/devices/${id}/config`, { method: "PUT",
+                       headers: { "content-type": "application/json" },
+                       body: JSON.stringify(config) }),
 };

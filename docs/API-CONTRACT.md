@@ -37,6 +37,8 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `GET` | `/api/admin/devices` | cookie, admin | List devices with last contact time |
 | `POST` | `/api/admin/devices` | cookie, admin | Register a device. **The key is in this response only** |
 | `DELETE` | `/api/admin/devices/{id}` | cookie, admin | Revoke a device credential |
+| `GET` | `/api/admin/devices/{id}/config` | cookie, admin | Effective (clamped) config, version, default or tuned |
+| `PUT` | `/api/admin/devices/{id}/config` | cookie, admin | Tune. Clamped on write; adjustments reported back |
 | `GET` | `/api/devices/config` | device headers | Signed configuration. See `DATA-CONTRACT.md` |
 | `GET` | `/api/health` | none | Liveness and which storage backend is wired |
 
@@ -79,7 +81,7 @@ Admin routes return `403` to an operator, never `404`.
 | `409` | Conflict, e.g. duplicate email | Show the message |
 | `422` | Query parameter failed validation | A client bug. Fix the caller |
 | `429` | Login throttled | Show the wait. Do not retry automatically |
-| `501` | Route exists, not implemented yet | Currently only `/api/devices/config` |
+| `503` | A server-side prerequisite is missing | Currently only `/api/devices/config` without `OCEANKIND_CONFIG_SIGNING_KEY`. Loud by design: it must never degrade to an unsigned payload |
 
 Body is FastAPI's `{"detail": "..."}` throughout. `detail` is written to be shown to a user; it never contains a secret, a path or a stack trace (R-4.4).
 
@@ -184,7 +186,9 @@ The consequence is a real gap and it is worth naming: a typo in `event.captured_
 
 `GET /api/devices/config` authenticates with `X-Device-Id` and `X-Device-Key`, not a session cookie. A compromised browser cannot reconfigure a device (R-6.1). Full payload, signature scheme, clamp ranges and expiry semantics are in `DATA-CONTRACT.md` under **Device configuration**, because the device is the consumer and the device repository mirrors that file.
 
-Currently returns `501`. The route, the credential check and the settings entry exist; the signing and clamping do not.
+**Implemented (R-6.2, 2026-08-18).** The payload is composed from the tuned values in SQLite (defaults at `config_version` 1 until the first tune), clamped to the DATA-CONTRACT ranges, and signed with hex HMAC-SHA256 over the canonical serialisation (UTF-8, keys sorted, no whitespace, `signature` excluded), keyed by `OCEANKIND_CONFIG_SIGNING_KEY`. `expires_utc` is `issued_utc` + 24 h and means *refresh me*, not *stop*. Without the signing key the route answers `503` — loud, and never an unsigned payload. The clamp table lives in code in `api/app/services/deviceconfig.py`; change it and `DATA-CONTRACT.md` together or not at all.
+
+**Tuning** (D-015: thresholds are the client's, bounds are ours) is `PUT /api/admin/devices/{id}/config`. Full replace; missing fields take defaults; unknown fields are a `400`, because a typo'd key that silently tuned nothing is a quiet failure. Out-of-range values are clamped to the nearest bound and reported back in `clamp_notes`, so the panel shows exactly what is now in force. An inverted PSD band (`psd_f_min >= psd_f_max`) and an invalid `detection_mode` are rejected, never repaired. Each accepted write bumps the monotonic `version`; the device applies only what is newer.
 
 **Credential issuance** (R-6.1, D-017): `POST /api/admin/devices` generates the key server-side and returns it in the creation response, once. It is stored only as an argon2 hash; there is no route that reads it back, by construction. A lost key means revoke and reissue. The device's `site_id` must exist in `_sites.json` — sites are data, and a typo here would otherwise mint a credential for a site that never existed. Every successful device authentication stamps `last_seen`, which the admin panel shows as provisioning feedback: a freshly keyed unit that never connects is visible, not assumed working. `DELETE` is revocation — the unit gets `401` on its next poll and keeps its last valid configuration, per the expiry semantics in `DATA-CONTRACT.md`.
 

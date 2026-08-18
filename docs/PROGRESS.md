@@ -58,8 +58,16 @@ Everything the presupuesto promises that a static page structurally cannot do. N
       visible in the panel. Delete = revocation; the unit keeps its last valid config
       (2026-08-13)
 
+- [x] Signed, clamped device configuration (R-6.2). `GET /api/devices/config` serves the
+      DATA-CONTRACT payload: tuned values from SQLite, clamped server-side before signing,
+      hex HMAC-SHA256 over the canonical JSON, monotonic `config_version`, 24 h refresh
+      window. Tuning is `PUT /api/admin/devices/{id}/config` plus a "Configurar" editor in
+      the panel; out-of-range values are clamped and reported, inverted PSD bands and enum
+      typos rejected. Missing signing key = `503`, never an unsigned payload. This is the
+      replacement path for F-10; the finding closes when the device stops reading
+      `remote_config.json`, which is device-repo Phase 2 work (2026-08-18)
+
 ### Open
-- [ ] `GET /api/devices/config` returns 501. Needs the signing key wired and the clamp table from `DATA-CONTRACT.md` implemented (R-6.2, F-10)
 - [ ] Conditional requests, `ETag` on rollups (R-5.7)
 - [ ] Types generated from `DATA-CONTRACT.md` so device fields are checked too. See `TODO.md`
 

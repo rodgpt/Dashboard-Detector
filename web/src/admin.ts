@@ -8,7 +8,7 @@
  *  - Cada fallo es visible y reintentabile; nada falla en silencio (R-7.1).
  */
 import { auth, data, admin, ApiError } from "./api.js";
-import type { Me, Site, AdminUser, AdminDevice } from "./api.js";
+import type { Me, Site, AdminUser, AdminDevice, DeviceConfig, DeviceConfigState } from "./api.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -249,6 +249,12 @@ function renderDevices(): void {
 
     const tdActions = document.createElement("td");
     tdActions.className = "actions";
+    const cfg = document.createElement("button");
+    cfg.type = "button";
+    cfg.className = "btn btn-ghost btn-sm";
+    cfg.textContent = "Configurar";
+    cfg.addEventListener("click", () => openConfigEditor(tr, d, cfg));
+    tdActions.appendChild(cfg);
     const del = document.createElement("button");
     del.type = "button";
     del.className = "btn btn-danger btn-sm";
@@ -285,6 +291,158 @@ function hideKey(): void {
   $<HTMLElement>("key-device-id").textContent = "";
   $<HTMLElement>("key-value").textContent = "";
   keyReveal.hidden = true;
+}
+
+// Umbrales del cliente, límites nuestros (D-015). Etiquetas y rangos según la
+// tabla de DATA-CONTRACT.md; el servidor es quien ajusta, esto sólo orienta.
+const CONFIG_FIELDS: { key: keyof DeviceConfig; label: string; min: number; max: number }[] = [
+  { key: "score_min",            label: "Puntaje mínimo (score)",      min: 0.05,  max: 0.95 },
+  { key: "alert_min_rms",        label: "RMS mínimo de alerta",        min: 0,     max: 0.20 },
+  { key: "alert_threshold",      label: "Umbral de alerta RMS",        min: 0.005, max: 0.50 },
+  { key: "psd_threshold_db",     label: "Umbral PSD (dB)",             min: 3,     max: 30 },
+  { key: "psd_f_min",            label: "Frecuencia mínima PSD (Hz)",  min: 20,    max: 2000 },
+  { key: "psd_f_max",            label: "Frecuencia máxima PSD (Hz)",  min: 100,   max: 20000 },
+  { key: "cooldown_s",           label: "Pausa entre avisos (s)",      min: 10,    max: 3600 },
+  { key: "heartbeat_interval_s", label: "Intervalo de latido (s)",     min: 30,    max: 3600 },
+];
+
+async function openConfigEditor(afterTr: HTMLTableRowElement, d: AdminDevice,
+                                trigger: HTMLButtonElement): Promise<void> {
+  trigger.disabled = true;
+  const editorTr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = 4;
+  const box = document.createElement("div");
+  box.className = "row-editor";
+  box.textContent = "Cargando configuración…";
+  td.appendChild(box);
+  editorTr.appendChild(td);
+  afterTr.insertAdjacentElement("afterend", editorTr);
+
+  const close = () => { editorTr.remove(); trigger.disabled = false; };
+
+  let state: DeviceConfigState;
+  try {
+    state = await admin.getDeviceConfig(d.id);
+  } catch (err) {
+    if (err instanceof ApiError && err.isAuth) { toLogin(); return; }
+    box.textContent = "";
+    const fb = document.createElement("div");
+    fb.className = "form-feedback";
+    feedback(fb, "error", err instanceof ApiError
+      ? `No se pudo cargar la configuración: ${err.message}`
+      : "No se pudo cargar la configuración.");
+    box.appendChild(fb);
+    const retry = document.createElement("button");
+    retry.type = "button"; retry.className = "btn btn-ghost btn-sm";
+    retry.textContent = "Cerrar";
+    retry.addEventListener("click", close);
+    box.appendChild(retry);
+    return;
+  }
+
+  box.textContent = "";
+  const title = document.createElement("p");
+  title.className = "hint";
+  const versionText = () => state.is_default
+    ? "Configuración por defecto (versión 1). Aún nadie la ha ajustado."
+    : `Versión ${state.version}. El equipo la aplica en su próxima consulta.`;
+  title.textContent = versionText();
+  box.appendChild(title);
+
+  const grid = document.createElement("div");
+  grid.className = "form-grid";
+
+  const modeField = document.createElement("div");
+  modeField.className = "field";
+  const modeLabel = document.createElement("label");
+  modeLabel.textContent = "Modo de detección";
+  const modeSelect = document.createElement("select");
+  for (const m of ["psd", "rms", "auto"] as const) {
+    const opt = document.createElement("option");
+    opt.value = m; opt.textContent = m;
+    opt.selected = state.config.detection_mode === m;
+    modeSelect.appendChild(opt);
+  }
+  modeField.appendChild(modeLabel);
+  modeField.appendChild(modeSelect);
+  grid.appendChild(modeField);
+
+  const inputs = new Map<string, HTMLInputElement>();
+  for (const f of CONFIG_FIELDS) {
+    const field = document.createElement("div");
+    field.className = "field";
+    const label = document.createElement("label");
+    label.textContent = f.label;
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = "any";
+    input.min = String(f.min);
+    input.max = String(f.max);
+    input.value = String(state.config[f.key]);
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = `Rango ${f.min} – ${f.max}`;
+    field.appendChild(label);
+    field.appendChild(input);
+    field.appendChild(hint);
+    inputs.set(f.key, input);
+    grid.appendChild(field);
+  }
+  box.appendChild(grid);
+
+  const fb = document.createElement("div");
+  fb.className = "form-feedback";
+  fb.hidden = true;
+  box.appendChild(fb);
+
+  const save = document.createElement("button");
+  save.type = "button"; save.className = "btn btn-primary btn-sm";
+  save.textContent = "Guardar configuración";
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.className = "btn btn-ghost btn-sm";
+  cancel.textContent = "Cerrar";
+  cancel.style.marginLeft = "8px";
+  box.appendChild(save);
+  box.appendChild(cancel);
+  cancel.addEventListener("click", close);
+
+  save.addEventListener("click", async () => {
+    fb.hidden = true;
+    const body = { detection_mode: modeSelect.value } as Record<string, unknown>;
+    for (const f of CONFIG_FIELDS) {
+      const raw = inputs.get(f.key)!.value.trim();
+      if (raw === "") {
+        feedback(fb, "error", `Falta un valor: ${f.label}.`);
+        return;
+      }
+      const n = Number(raw);
+      if (!Number.isFinite(n)) {
+        feedback(fb, "error", `Valor no numérico en: ${f.label}.`);
+        return;
+      }
+      body[f.key] = n;
+    }
+    save.disabled = true;
+    try {
+      state = await admin.setDeviceConfig(d.id, body as unknown as DeviceConfig);
+      // el servidor es la verdad: refleja lo que quedó en vigor, ajustes incluidos
+      for (const f of CONFIG_FIELDS) {
+        inputs.get(f.key)!.value = String(state.config[f.key]);
+      }
+      modeSelect.value = state.config.detection_mode;
+      title.textContent = versionText();
+      feedback(fb, "ok", state.clamp_notes.length
+        ? `Guardada (versión ${state.version}). Valores ajustados al rango permitido: `
+          + state.clamp_notes.join("; ")
+        : `Guardada (versión ${state.version}).`);
+    } catch (err) {
+      if (err instanceof ApiError && err.isAuth) { toLogin(); return; }
+      feedback(fb, "error", err instanceof ApiError ? err.message : "No se pudo guardar.");
+    } finally {
+      save.disabled = false;
+    }
+  });
 }
 
 async function deleteDevice(d: AdminDevice, button: HTMLButtonElement): Promise<void> {

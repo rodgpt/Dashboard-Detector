@@ -1,17 +1,19 @@
 """User, site-assignment and device-credential management. The 'panel de
 administración' the presupuesto promises, with no cloud console involved (R-3.3)."""
+import json
 import re
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlmodel import Session, select, delete
 
 from app.core.db import get_session
-from app.core.models import User, SiteAccess, Device
+from app.core.models import User, SiteAccess, Device, DeviceConfig
 from app.core.security import require_admin, hash_password
 from app.services.storage import get_storage
+from app.services import deviceconfig
 
 router = APIRouter()
 
@@ -151,4 +153,65 @@ def delete_device(device_pk: int, _: User = Depends(require_admin),
     d = db.get(Device, device_pk)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such device")
+    db.exec(delete(DeviceConfig).where(DeviceConfig.device_id == d.device_id))
     db.delete(d); db.commit()
+
+
+# ── device configuration tuning (R-6.2, D-015) ───────────────────────────────
+# The client tunes thresholds here, without a firmware update. Values are
+# clamped on write and the adjusted result is returned, so what the panel
+# shows is exactly what the device will be told.
+
+class DeviceConfigOut(BaseModel):
+    device_id: str
+    version: int                  # monotonic; the device applies only newer
+    is_default: bool              # true until the first tune is saved
+    updated_utc: datetime | None
+    config: dict
+    clamp_notes: list[str] = []   # non-empty when a submitted value was bounded
+
+
+def _get_device(device_pk: int, db: Session) -> Device:
+    d = db.get(Device, device_pk)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such device")
+    return d
+
+
+@router.get("/devices/{device_pk}/config", response_model=DeviceConfigOut)
+def get_device_config(device_pk: int, _: User = Depends(require_admin),
+                      db: Session = Depends(get_session)):
+    d = _get_device(device_pk, db)
+    row = db.exec(select(DeviceConfig)
+                  .where(DeviceConfig.device_id == d.device_id)).first()
+    if row:
+        return DeviceConfigOut(device_id=d.device_id, version=row.version,
+                               is_default=False, updated_utc=row.updated_utc,
+                               config=json.loads(row.config_json))
+    return DeviceConfigOut(device_id=d.device_id, version=1, is_default=True,
+                           updated_utc=None, config=dict(deviceconfig.DEFAULTS))
+
+
+@router.put("/devices/{device_pk}/config", response_model=DeviceConfigOut)
+def put_device_config(device_pk: int, body: dict, _: User = Depends(require_admin),
+                      db: Session = Depends(get_session)):
+    """Full replace. Missing fields take defaults; unknown fields are an error,
+    because a typo'd key that silently tuned nothing is a quiet failure."""
+    d = _get_device(device_pk, db)
+    try:
+        config, notes = deviceconfig.validate_and_clamp(body)
+    except deviceconfig.ConfigError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+
+    row = db.exec(select(DeviceConfig)
+                  .where(DeviceConfig.device_id == d.device_id)).first()
+    if row:
+        row.version += 1
+        row.config_json = json.dumps(config)
+    else:
+        row = DeviceConfig(device_id=d.device_id, config_json=json.dumps(config))
+    row.updated_utc = datetime.now(timezone.utc)
+    db.add(row); db.commit(); db.refresh(row)
+    return DeviceConfigOut(device_id=d.device_id, version=row.version,
+                           is_default=False, updated_utc=row.updated_utc,
+                           config=config, clamp_notes=notes)
