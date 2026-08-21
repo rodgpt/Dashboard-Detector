@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.core.config import settings
-from app.core.db import get_session
+from app.core.database import get_session
 from app.core.models import User
 from app.core.security import current_user, assert_site_allowed, allowed_sites
 from app.services.storage import get_storage

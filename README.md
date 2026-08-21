@@ -1,7 +1,7 @@
 # OceanKind Dashboard
 
-Dashboard for an underwater acoustic monitoring network. FastAPI backend, TypeScript
-frontend, one container, runs anywhere.
+Dashboard for an underwater acoustic monitoring network. FastAPI backend, React +
+TypeScript frontend, Postgres. Three containers, runs anywhere.
 
 Authentication, users and secrets are **ours**. No managed identity provider, no
 cloud-specific runtime. Moving to AWS or a bare server is an environment variable
@@ -19,8 +19,13 @@ cp .env.example .env          # then set OCEANKIND_SESSION_SECRET
 make dev
 ```
 
-`make dev` generates local fixtures, compiles the frontend and starts the container
-on http://localhost:8000. No cloud account, no device, no network.
+`make dev` generates local fixtures, builds the images, starts `db`, `backend` and
+`frontend`, and applies migrations. The app is on **http://localhost:3000**. No
+cloud account, no device, no network.
+
+The backend is also published on :8000 for debugging, but use :3000 — that goes
+through nginx, which is the same origin and the same cookie behaviour as
+production. Hitting :8000 directly is neither.
 
 Set `OCEANKIND_BOOTSTRAP_ADMIN_EMAIL` and `OCEANKIND_BOOTSTRAP_ADMIN_PASSWORD` in
 `.env` to create the first administrator on a fresh database. The email must be a
@@ -28,13 +33,16 @@ real-format address (reserved domains like `.local` are rejected, because login
 validates them) and the password at least 12 characters; the API refuses to start
 otherwise rather than bootstrap an account that cannot log in.
 
-Then sign in at http://localhost:8000/login. User and site-assignment management
-lives at http://localhost:8000/admin (administrators only; operators get a
-permission message, not a login loop).
+Then sign in at http://localhost:3000/login. User, site-assignment and device
+management lives at http://localhost:3000/admin (administrators only; operators
+get a permission message, not a login loop).
 
 ```bash
-make test        # backend tests, including the access-control ones
-make logs
+make test               # backend tests, including the access-control ones
+make rebuild            # after dependency or Dockerfile changes
+make migrate m="..."    # generate an Alembic revision
+make psql               # shell on the database
+make logs s=frontend    # follow one service
 make down
 ```
 
@@ -43,23 +51,28 @@ make down
 ## Architecture
 
 ```
-browser ──cookie session──> FastAPI ──credential──> blob storage (private)
-                               │
-                               ├── SQLite: users, roles, site assignments
-                               └── secrets: twilio, storage, signing keys
+browser
+  └─ https ─> frontend  (nginx, serves the React build)
+                 ├─ /            static assets, SPA fallback
+                 └─ /api/  ────>  backend  (FastAPI, JSON only)
+                                     ├─ db  (postgres, internal, never exposed)
+                                     ├─ blob storage (private, credential here)
+                                     └─ secrets: twilio, storage, signing keys
 ```
 
-The browser never touches storage and never holds a credential. The container is
-the only thing with keys, and it reads them from the environment.
+Three containers. The browser talks only to nginx and never touches storage or
+holds a credential. The backend is internal in production; only `frontend` is
+reachable. Ports, volumes and deployment constraints are in
+[`docs/SERVER-INFRASTRUCTURE.md`](docs/SERVER-INFRASTRUCTURE.md).
 
-**Portability** lives in `api/app/services/storage.py`. One `Storage` interface,
+**Portability** lives in `backend/app/services/storage.py`. One `Storage` interface,
 a `LocalStorage` for development and an `AzureBlobStorage` for production. S3 is a
 third subclass and one line in `get_storage()`; nothing else in the codebase knows
 which cloud it is on.
 
-**SQLite** holds only users, roles and site assignments. Detections stay in blob
-storage, so the database file stays small enough to copy around. Swapping to
-Postgres is a connection string.
+**Postgres** holds only users, roles, site assignments, device credentials and
+tuned device configs. Detections stay in blob storage. Schema changes go through
+Alembic migrations — never by hand, never by `create_all`.
 
 ---
 
@@ -68,19 +81,25 @@ Postgres is a connection string.
 ```
 ├── REQUIREMENTS.md        what this must do, numbered and testable
 ├── CLAUDE.md              rules for AI assistants
-├── api/
+├── backend/               FastAPI. JSON only, serves no HTML
 │   ├── app/
-│   │   ├── core/          config, models, db, security, rate limiting
+│   │   ├── core/          config, database, models, security, rate_limit
 │   │   ├── routers/       auth, admin, data, devices
-│   │   └── services/      storage interface, event queries
+│   │   └── services/      storage (portability seam), events, deviceconfig
+│   ├── alembic/           migrations. the schema lives here
 │   └── tests/
-├── web/
-│   ├── src/api.ts         the typed client. the only thing that calls the backend
-│   ├── src/generated/     api-types.ts, generated from openapi.json. do not edit
-│   └── static/            html shell, css, assets
+├── frontend/              React + TypeScript + Vite, built into nginx
+│   ├── src/api/client.ts  the typed client. the only thing that calls the backend
+│   ├── src/api/generated.ts  from openapi.json. do not edit
+│   ├── src/pages/         one per route
+│   ├── src/components/    shared UI
+│   ├── nginx.conf         serves the build, proxies /api/ to the backend
+│   └── Dockerfile         node build -> nginx
+├── web/                   SUPERSEDED. reference only, see web/README.md
 ├── docs/
 │   ├── DATA-CONTRACT.md   device to storage. mirrors the canonical copy in Rpi-Detector
 │   ├── API-CONTRACT.md    backend to browser. openapi.json is the generated half
+│   ├── SERVER-INFRASTRUCTURE.md  ports, containers, deployment constraints
 │   ├── PROGRESS.md
 │   └── TODO.md
 └── tools/
@@ -111,7 +130,7 @@ receives 403 on another, on every endpoint, and the site does not appear in
 
 ## Things to know
 
-**Pagination is written, not free.** `api/app/services/events.py` resolves a time
+**Pagination is written, not free.** `backend/app/services/events.py` resolves a time
 range to date-partitioned blob prefixes and lists only those. Response includes
 `scanned_blobs` so the cost is visible rather than guessed.
 
@@ -125,5 +144,10 @@ Never interpolate them.
 **Cookies are `secure` by default**, which requires https. `OCEANKIND_COOKIE_SECURE=false`
 for local http development only.
 
-**The frontend has no bundler and no framework.** `tsc` emits ES modules the browser
-loads directly. Chart.js and Leaflet stay as they are.
+**The backend serves no HTML.** nginx owns everything that is not `/api/`,
+including the SPA fallback. If a `StaticFiles` mount appears in the backend, the
+old single-container shape is creeping back — see D-019.
+
+**One backend replica, deliberately.** The login throttle counts failures in
+process memory, so a second replica makes it bypassable. See
+`docs/SERVER-INFRASTRUCTURE.md` before scaling anything.

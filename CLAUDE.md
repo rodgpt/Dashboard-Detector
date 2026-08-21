@@ -1,6 +1,10 @@
 # CLAUDE.md — OceanKind Dashboard
 
-Rules for working in this repository. Based on the Lynch Protocol `lyncHtmlDev` variant, extended: this is no longer a page on a static host, it is a container that owns users, sessions and secrets.
+Rules for working in this repository. Lynch Protocol **`lynchLocalDev`** variant — full-stack: separate backend and frontend containers, a database container, and a real build pipeline.
+
+Adapted on one point: deployment targets a client's Azure subscription, not the home server, so there is no Cloudflare Tunnel and no shared port registry. `docs/SERVER-INFRASTRUCTURE.md` covers this app only.
+
+> **Read D-019 before proposing any structural change.** This repository spent its first phases scaffolded on `lyncHtmlDev` — the *static site* variant — with a backend bolted on. The result was a FastAPI app serving a single 3,129-line HTML file, no frontend/backend divide, and a deployable image that contained no frontend at all. If a rule here looks like it came from a static-site project, check D-019 before obeying it.
 
 Self-contained. Everything referenced here is in this repository.
 
@@ -14,7 +18,8 @@ Self-contained. Everything referenced here is in this repository.
 4. **`docs/PROGRESS.md`** — what's built, what phase the work is in
 5. **`docs/TODO.md`** — known issues outside the roadmap
 6. **`docs/STYLEGUIDE.md`** — palette, components. Consistency is not negotiable
-7. **`DECISIONS.md`** — why things are the way they are
+7. **`docs/SERVER-INFRASTRUCTURE.md`** — ports, containers, deployment shape. **Read before any Docker, networking or deployment decision**
+8. **`DECISIONS.md`** — why things are the way they are. **D-019 first**
 
 If your change assumes a field the device might not produce yet, check [`Rpi-Detector/raspberry-pi/docs/PROGRESS.md`](https://github.com/rodgpt/Rpi-Detector/blob/main/raspberry-pi/docs/PROGRESS.md) before building against it.
 
@@ -30,15 +35,27 @@ We build the plumbing, not the detection science. Nothing here decides what coun
 
 ## Shape
 
-One container. FastAPI serves the API and the compiled frontend. SQLite holds users, roles and site assignments; detections stay in blob storage.
+Three containers. The browser talks only to nginx; nginx proxies `/api/` to the backend over the compose network. Postgres holds users, roles, site assignments and device records; detections stay in blob storage.
 
 ```
-api/app/core/      config, db, models, security, ratelimit
-api/app/routers/   auth, admin, data, devices
-api/app/services/  storage (the portability seam), events (pagination)
-web/src/           TypeScript. api.ts is the only thing that talks to the backend
-web/static/        the client's v2 dashboard, moved in intact. being split, see TODO
+db          postgres:16-alpine, pgdata volume. never exposed to the host
+backend     FastAPI, :8000. serves JSON only — no HTML, no static assets
+frontend    vite build -> nginx:alpine, :80. serves the app, proxies /api/
 ```
+
+```
+backend/app/core/       config, database, models, security, rate_limit
+backend/app/routers/    auth, admin, data, devices
+backend/app/services/   storage (the portability seam), events (pagination),
+                        deviceconfig (clamping + HMAC signing)
+backend/alembic/        migrations. schema changes never happen by hand
+frontend/src/api/       client.ts — the only thing that talks to the backend
+frontend/src/pages/     one per route: Login, Admin, Detections, Acoustic, …
+frontend/src/components/ shared UI
+```
+
+**The backend serves no HTML.** If you find yourself adding `StaticFiles` or a
+`FileResponse` to a router, stop — that is the old shape reasserting itself.
 
 ---
 
@@ -85,15 +102,20 @@ web/static/        the client's v2 dashboard, moved in intact. being split, see 
 Develop against fixtures. No cloud account, no device, no detection science:
 
 ```bash
-make dev            # fixtures + typescript + container
+make dev            # fixtures + db + backend + frontend, all three up
+make rebuild        # after backend dependency or Dockerfile changes
 make test           # backend tests
+make migrate m="…"  # generate an Alembic revision. never edit the schema by hand
 make openapi types  # regenerate the schema and the frontend types
 make contract       # DATA-CONTRACT.md still matches the canonical copy
 ```
 
+Use the Makefile targets, not raw `docker compose`, unless the Makefile does not
+cover the case.
+
 The fixtures deliberately include the awkward cases: a degraded site, suppressed detections, failed uploads, a multi-hour telemetry gap, null-valued fields, and forecast data past the observation boundary. If a change works against fixtures it works against production.
 
-Bandwidth is a hard constraint. The backend exists partly so the browser stops downloading the whole history every thirty seconds (F-18). Keep pagination, time windowing and conditional requests in `services/events.py` and `web/src/api.ts`, one place each.
+Bandwidth is a hard constraint. The backend exists partly so the browser stops downloading the whole history every thirty seconds (F-18). Keep pagination, time windowing and conditional requests in `backend/app/services/events.py` and `frontend/src/api/client.ts`, one place each.
 
 Assume more than one site, always.
 
@@ -122,8 +144,9 @@ Test `?play=` against a clip that does not exist. That happens whenever an uploa
 3. **`docs/PROGRESS.md`** — check items off
 4. **`docs/TODO.md`** — add what you found, check off what you fixed
 5. **`docs/STYLEGUIDE.md`** if a new colour, component or pattern appeared
-6. **`REQUIREMENTS.md`** if the spec itself changed, which should be rare and deliberate
-7. **`README.md`** if the data sources or the run instructions changed
+6. **`docs/SERVER-INFRASTRUCTURE.md`** if ports, containers or the deployment shape changed
+7. **`REQUIREMENTS.md`** if the spec itself changed, which should be rare and deliberate
+8. **`README.md`** if the data sources or the run instructions changed
 
 Do it before considering anything done. Context gets compressed, sessions end, the docs are what survives.
 

@@ -1,14 +1,57 @@
+# Three services, per the lynchLocalDev variant (D-019).
+# The browser talks to `frontend` only; nginx proxies /api/ to `backend`.
+# Run: make dev
+
 services:
-  api:
-    build: ./api
-    env_file: .env
-    ports:
-      - "${API_PORT:-8000}:8000"
-    volumes:
-      - ./api/app:/app/app          # hot reload in dev
-      - ./api/tests:/app/tests:ro   # so `make test` finds them; the image ships without tests
-      - ./api/pytest.ini:/app/pytest.ini:ro
-      - ./data:/data                # sqlite lives here, survives rebuilds
-      - ./fixtures:/fixtures:ro     # local storage backend reads this
-      - ./web/dist:/web:ro          # compiled frontend, served by the api
+  db:
+    image: postgres:16-alpine
+    container_name: oceankind-db
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oceankind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oceankind}
+      POSTGRES_DB: ${POSTGRES_DB:-oceankind}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No host port. Reach it with: docker compose exec db psql -U oceankind oceankind
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oceankind}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: oceankind-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      OCEANKIND_DB_URL: ${OCEANKIND_DB_URL:-postgresql+psycopg://oceankind:oceankind@db:5432/oceankind}
+    volumes:
+      - ./backend/app:/app/app            # hot reload in dev
+      - ./backend/tests:/app/tests:ro
+      - ./backend/alembic:/app/alembic    # so `make migrate` writes to the repo
+      - ./fixtures:/fixtures:ro           # local storage backend reads this
+    # Published for debugging only. In production the backend is internal and
+    # only `frontend` is reachable — see docs/SERVER-INFRASTRUCTURE.md.
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: oceankind-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  pgdata:

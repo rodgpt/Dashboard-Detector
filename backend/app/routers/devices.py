@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlmodel import Session, select
 
-from app.core.db import get_session
+from app.core.database import get_session
 from app.core.models import Device, DeviceConfig
 from app.core.security import verify_password
 from app.core.config import settings

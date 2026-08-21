@@ -32,6 +32,7 @@ Domain-only choices that affect nothing outside their folder can live in that fo
 | D-016 | DECIDED | Device leads on v2, dashboard follows through a removable adapter | — |
 | D-017 | DECIDED | Device credential provisioning on the bench, through the issuance API | R-6.1 shape |
 | D-018 | PROPOSED | Fleet-scale credential lifecycle: rotation over the wire, enrollment | R-6.3 scope |
+| D-019 | DECIDED | Wrong protocol variant. Rebuild on `lynchLocalDev`: real backend/frontend divide | R-9, every phase |
 
 ---
 
@@ -367,3 +368,44 @@ What this deliberately does not cover: rotating keys on deployed units nobody ca
 **Decide when.** Rotate-over-the-wire: with R-6.3, when device event upload is specified. Enrollment: when a rollout beyond tens of units is confirmed, or the client asks to commission units without us.
 
 **Trickles into (if accepted).** `docs/API-CONTRACT.md` device routes, `docs/DATA-CONTRACT.md` device configuration section, `Rpi-Detector` provisioning and runbook, R-6.3 scope.
+
+---
+
+## D-019 — This repository was scaffolded on the wrong protocol variant
+
+**Status:** DECIDED, 2026-08-21
+
+**Context.** The Lynch Protocol has four variants. This repository was scaffolded on `lyncHtmlDev`, which the protocol defines as *"Static HTML/CSS/JS sites, landing pages. No backend, no API docs."* `CLAUDE.md` acknowledged the mismatch in its own first line — "based on the `lyncHtmlDev` variant, **extended**: this is no longer a page on a static host, it is a container that owns users, sessions and secrets" — and extended the variant rather than changing it.
+
+That extension is the root cause of every structural complaint against this codebase, and the complaints are correct:
+
+- There is no backend/frontend divide, because the variant has no concept of one. The frontend is not a service; it is a folder of files bind-mounted into the API container.
+- A FastAPI backend serves a single 3,129-line HTML file containing inline `<script>`, inline `<style>`, roughly 389 loose JS declarations and **two complete CSS theme layers**, one of which is dead and overridden with `!important`.
+- `docs/TODO.md` has carried "the reason it was one file (no backend, no build step) no longer applies" since it was 1,779 lines. It grew 76% behind that note.
+- The deployed image ships no frontend at all (`api/Dockerfile` copies `app/` only). This was invisible locally because the compose bind mount always covered it. In a two-container split the failure is impossible by construction.
+- `REQUIREMENTS.md` R-9.3 forbade a bundler and a framework. That rule was inherited from a static-site variant and was never true of this product.
+
+**Decision.** Rebuild on **`lynchLocalDev`** — the protocol's full-stack variant, *"backend + frontend + server deployment. Most projects use this."* Three containers, per the scaffold at `_lynchProtocol/lynch-project-scaffolder.skill`:
+
+```
+db        postgres:16-alpine, pgdata volume, healthcheck
+backend   FastAPI, its own Dockerfile, :8000
+frontend  node build -> nginx:alpine, its own Dockerfile, :80,
+          proxies /api/ to http://backend:8000 over the compose network
+```
+
+Frontend stack is the protocol default: **React 18 + TypeScript + Vite**, with `react-chartjs-2` and `react-leaflet` replacing the CDN script tags. Backend gains **Postgres + Alembic** in place of the SQLite file.
+
+**What does not change, and it is most of the work.** Every router (`auth`, `admin`, `data`, `devices`), `core/security.py`, `services/storage.py` (the portability seam — R-1.2 is untouched), `services/deviceconfig.py` (clamping and HMAC signing), `services/events.py` (date-partitioned pagination), `services/legacy_v1.py` (the v1 adapter), and all 25 tests. The backend logic was never the problem.
+
+**Two deliberate deviations from the scaffold, recorded so they are not mistaken for drift.**
+
+*Session cookies, not the scaffold's JWT.* The scaffold ships `SECRET_KEY` / `ACCESS_TOKEN_EXPIRE_MINUTES` JWT auth. A JWT in a browser lives somewhere JavaScript can read it, which contradicts this project's hard rule that the browser never holds a credential (R-4.2). HttpOnly signed cookies are already built and tested. They stay. nginx proxying `/api/` keeps browser and API same-origin, so nothing about cookie handling gets harder.
+
+*Postgres over SQLite, reversing R-9.2.* R-9.2 argued one file, no server, small enough to copy around. On any container host the filesystem is ephemeral, so that file takes every user, device credential and tuned device config with it on the first restart. The scaffold's `db` service with a named volume removes the problem rather than documenting it.
+
+**Consequences.** `REQUIREMENTS.md` R-9 is rewritten: R-9.2 (SQLite) and R-9.3 (no bundler, no framework) were artefacts of the wrong variant and are replaced. Phase 2 stops meaning "rewire the monolith's fetches" and becomes "build the five views as React pages against the API"; the monolith is deleted rather than split. The estimate for that is 20–30 hours and it is the honest cost of not having caught this at scaffold time.
+
+**What this does not excuse.** The variant was wrong from the first commit, and the evidence was in the repository the whole time — in `CLAUDE.md`'s own "extended" caveat and in the `TODO.md` note. Several sessions of work were spent adding features inside a structure that should have been challenged instead.
+
+**Trickles into.** `CLAUDE.md`, `README.md`, `REQUIREMENTS.md` R-9, `docs/PROGRESS.md` (re-phased), `docs/STYLEGUIDE.md`, `docs/API-CONTRACT.md` (origin and proxy model), and a new `docs/SERVER-INFRASTRUCTURE.md` per the `lynchLocalDev` doc set.

@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 from app.main import app
-from app.core.db import init_db, engine
+from app.core.database import init_db, engine
 from app.core.models import User, SiteAccess
 from app.core.security import hash_password
 

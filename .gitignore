@@ -2,8 +2,8 @@
 .env
 data/
 fixtures/
-web/dist/
-web/node_modules/
+dist/
+node_modules/
 __pycache__/
 *.pyc
 .venv/

@@ -35,7 +35,9 @@ class Settings(BaseSettings):
                      "matanzas:Matanzas:-33.986651:-71.860234")
     # LEGACY-V1-END
 
-    db_url: str = "sqlite:////data/oceankind.db"
+    # Postgres in its own container (R-9.2, D-019). SQLite is still accepted so
+    # the test suite can run against a temp file without a database service.
+    db_url: str = "postgresql+psycopg://oceankind:oceankind@db:5432/oceankind"
     session_hours: int = 12
     # Secure cookies require https. Off only for local http development.
     cookie_secure: bool = True

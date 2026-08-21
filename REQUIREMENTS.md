@@ -140,11 +140,17 @@ We build the plumbing. The client provides the detection science.
 
 ## R-9 Stack and build
 
-**R-9.1 MUST** be FastAPI on the backend and TypeScript on the frontend.
+**R-9.1 MUST** be FastAPI on the backend and React 18 + TypeScript + Vite on the frontend, per the `lynchLocalDev` protocol variant (D-019).
 
-**R-9.2 MUST** use SQLite for users, roles and site assignments. One file, no server. Detections stay in blob storage. Swappable to Postgres by connection string if it ever needs to be.
+**R-9.2 MUST** use PostgreSQL for users, roles, site assignments and device records, in its own container with a named volume. Detections stay in blob storage. Schema changes go through Alembic migrations, never by hand.
 
-**R-9.3 MUST** keep the frontend build to TypeScript compilation only. No bundler and no frontend framework; the existing charting and mapping libraries stay as they are.
+*Revised 2026-08-21 (D-019).* This previously mandated SQLite as "one file, no server". On a container host the filesystem is ephemeral, so that file destroys every user, device credential and tuned device config on the first restart.
+
+**R-9.3 MUST** deploy as **separate backend and frontend containers**. The frontend builds to static assets served by nginx, which proxies `/api/` to the backend over the internal network. The backend serves no HTML and no static assets.
+
+*Test:* the frontend image serves the interface with the backend container stopped, and returns a visible failure for data rather than a blank page.
+
+*Revised 2026-08-21 (D-019).* This previously forbade a bundler and a frontend framework — a rule inherited from the static-site protocol variant this repository was wrongly scaffolded on.
 
 **R-9.4 MUST** be developable end to end against local fixtures with no cloud account.
 

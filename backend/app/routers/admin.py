@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlmodel import Session, select, delete
 
-from app.core.db import get_session
+from app.core.database import get_session
 from app.core.models import User, SiteAccess, Device, DeviceConfig
 from app.core.security import require_admin, hash_password
 from app.services.storage import get_storage

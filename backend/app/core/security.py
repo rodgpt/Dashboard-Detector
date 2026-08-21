@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlmodel import Session, select
 
 from app.core.config import settings
-from app.core.db import get_session
+from app.core.database import get_session
 from app.core.models import User, SiteAccess
 
 _ph = PasswordHasher()

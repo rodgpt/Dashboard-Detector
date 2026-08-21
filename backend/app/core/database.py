@@ -1,3 +1,8 @@
+"""Database access. Postgres in production, in its own container (R-9.2, D-019).
+
+SQLite is still accepted for the test suite, which wants a temp file rather than
+a database service. That is the only reason the branch below exists.
+"""
 from sqlmodel import SQLModel, Session, create_engine, select
 from app.core.config import settings
 
@@ -8,18 +13,29 @@ def engine():
     global _engine
     if _engine is None:
         url = settings().db_url
-        _engine = create_engine(url, connect_args={"check_same_thread": False}
-                                if url.startswith("sqlite") else {})
+        _engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False} if url.startswith("sqlite") else {},
+            pool_pre_ping=not url.startswith("sqlite"),   # survive a db restart
+        )
     return _engine
 
 
 def init_db() -> None:
-    """Create tables and, on a fresh deployment, the first administrator (R-3.5)."""
+    """Bootstrap the first administrator on a fresh deployment (R-3.5).
+
+    **The schema is Alembic's, not this function's.** `create_all` runs only on
+    SQLite, where the tests use a throwaway file and there is no migration step.
+    On Postgres, tables come from `make migrate` / `alembic upgrade head`; if a
+    table is missing here, the fix is a migration, never a `create_all`.
+    """
     from app.core.models import User
     from app.core.security import hash_password
-    SQLModel.metadata.create_all(engine())
 
     s = settings()
+    if s.db_url.startswith("sqlite"):
+        SQLModel.metadata.create_all(engine())
+
     if not (s.bootstrap_admin_email and s.bootstrap_admin_password):
         return
     # The login route validates emails, so an address that fails validation here
