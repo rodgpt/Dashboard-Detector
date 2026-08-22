@@ -10,7 +10,7 @@ make openapi          # writes docs/openapi.json
 
 This document is the part a generator cannot produce: why the surface is shaped this way, and what a client is obliged to do with it.
 
-Last updated 2026-08-13. Requirement IDs refer to `../REQUIREMENTS.md`.
+Last updated 2026-08-21. Requirement IDs refer to `../REQUIREMENTS.md`.
 
 ---
 
@@ -34,6 +34,11 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `POST` | `/api/admin/users` | cookie, admin | Create a user |
 | `PUT` | `/api/admin/users/{id}/sites` | cookie, admin | Replace a user's site assignments |
 | `DELETE` | `/api/admin/users/{id}` | cookie, admin | Delete a user |
+| `GET` | `/api/admin/sites` | cookie, admin | Site registry with its source |
+| `POST` | `/api/admin/sites` | cookie, admin | Register a site |
+| `PUT` | `/api/admin/sites/{id}` | cookie, admin | Rename, move, activate or deactivate |
+| `DELETE` | `/api/admin/sites/{id}` | cookie, admin | Remove a site. Refused while referenced |
+| `POST` | `/api/admin/sites/import` | cookie, admin | Seed the table from `_sites.json` |
 | `GET` | `/api/admin/devices` | cookie, admin | List devices with last contact time |
 | `POST` | `/api/admin/devices` | cookie, admin | Register a device. **The key is in this response only** |
 | `DELETE` | `/api/admin/devices/{id}` | cookie, admin | Revoke a device credential |
@@ -81,11 +86,27 @@ Admin routes return `403` to an operator, never `404`.
 | `409` | Conflict, e.g. duplicate email | Show the message |
 | `422` | Query parameter failed validation | A client bug. Fix the caller |
 | `429` | Login throttled | Show the wait. Do not retry automatically |
-| `503` | A server-side prerequisite is missing | Currently only `/api/devices/config` without `OCEANKIND_CONFIG_SIGNING_KEY`. Loud by design: it must never degrade to an unsigned payload |
+| `503` | A server-side prerequisite is missing | Currently only `/api/devices/config` without `OCEANKIND_CONFIG_HMAC_KEY`. Loud by design: it must never degrade to an unsigned payload |
 
 Body is FastAPI's `{"detail": "..."}` throughout. `detail` is written to be shown to a user; it never contains a secret, a path or a stack trace (R-4.4).
 
-**`401` and `403` are different and the client must treat them differently.** Conflating them logs a user out every time they open a site they do not have. `api.ts` exposes `ApiError.isAuth` and `ApiError.isForbidden` for exactly this.
+**`401` and `403` are different and the client must treat them differently.** Conflating them logs a user out every time they open a site they do not have. `frontend/src/api/client.ts` exposes `ApiError.isAuth` and `ApiError.isForbidden` for exactly this.
+
+---
+
+## The site registry
+
+`GET /api/sites` (any session, filtered by permission) and `GET /api/admin/sites` (admin, unfiltered) read one registry with one rule:
+
+**Postgres wins when it has rows; otherwise `_sites.json` in storage.**
+
+`GET /api/admin/sites` returns `source`, which is `database`, `storage` or `empty`. That distinction is surfaced rather than hidden: `storage` means the registry is still the blob fallback and nothing has been managed yet, and `empty` means a fresh container where the first site has to be created before any device can be registered.
+
+The fallback exists so a fixture tree works with no setup. The table exists because nothing writes that blob outside the fixture generator, so a fresh private container had no registry at all — which made `/api/sites` empty and made device registration impossible, since a device credential is always issued against a known site. `POST /api/admin/sites/import` copies the blob into the table, explicitly; it is never done automatically, because silently materialising rows would leave it unclear which side is authoritative.
+
+`site_id` is immutable. It is a storage path segment (`sites/{site_id}/…`), so renaming one would orphan every event, clip and rollup already written under it. `DELETE` is refused with `409` while any device or user assignment still references the site.
+
+The device never reads the registry — it writes to `sites/{site_id}/…` and nothing else — so which side is authoritative is the dashboard's to decide. `DATA-CONTRACT.md` still documents the blob, unchanged, because it remains a valid artifact when present.
 
 ---
 
@@ -186,7 +207,7 @@ The consequence is a real gap and it is worth naming: a typo in `event.captured_
 
 `GET /api/devices/config` authenticates with `X-Device-Id` and `X-Device-Key`, not a session cookie. A compromised browser cannot reconfigure a device (R-6.1). Full payload, signature scheme, clamp ranges and expiry semantics are in `DATA-CONTRACT.md` under **Device configuration**, because the device is the consumer and the device repository mirrors that file.
 
-**Implemented (R-6.2, 2026-08-18).** The payload is composed from the tuned values in SQLite (defaults at `config_version` 1 until the first tune), clamped to the DATA-CONTRACT ranges, and signed with hex HMAC-SHA256 over the canonical serialisation (UTF-8, keys sorted, no whitespace, `signature` excluded), keyed by `OCEANKIND_CONFIG_SIGNING_KEY`. `expires_utc` is `issued_utc` + 24 h and means *refresh me*, not *stop*. Without the signing key the route answers `503` — loud, and never an unsigned payload. The clamp table lives in code in `api/app/services/deviceconfig.py`; change it and `DATA-CONTRACT.md` together or not at all.
+**Implemented (R-6.2, 2026-08-18).** The payload is composed from the tuned values in SQLite (defaults at `config_version` 1 until the first tune), clamped to the DATA-CONTRACT ranges, and signed with hex HMAC-SHA256 over the canonical serialisation (UTF-8, keys sorted, no whitespace, `signature` excluded), keyed by `OCEANKIND_CONFIG_HMAC_KEY`. `expires_utc` is `issued_utc` + 24 h and means *refresh me*, not *stop*. Without the signing key the route answers `503` — loud, and never an unsigned payload. The clamp table lives in code in `api/app/services/deviceconfig.py`; change it and `DATA-CONTRACT.md` together or not at all.
 
 **Tuning** (D-015: thresholds are the client's, bounds are ours) is `PUT /api/admin/devices/{id}/config`. Full replace; missing fields take defaults; unknown fields are a `400`, because a typo'd key that silently tuned nothing is a quiet failure. Out-of-range values are clamped to the nearest bound and reported back in `clamp_notes`, so the panel shows exactly what is now in force. An inverted PSD band (`psd_f_min >= psd_f_max`) and an invalid `detection_mode` are rejected, never repaired. Each accepted write bumps the monotonic `version`; the device applies only what is newer.
 

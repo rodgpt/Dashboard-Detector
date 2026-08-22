@@ -35,18 +35,13 @@ class EventsPage(BaseModel):
     offset: int
     has_more: bool
     scanned_blobs: int
-    # LEGACY-V1-BEGIN
-    # Set only by the v1 source: tells the client which fields could not be
-    # recovered, so it labels them instead of rendering a guess.
-    contract: dict | None = None
-    # LEGACY-V1-END
 
 
 @router.get("/sites", response_model=SitesOut)
 def sites(user: User = Depends(current_user), db: Session = Depends(get_session)):
     """Only the sites this user may see. The list itself is a permission boundary."""
-    doc = read_json(get_storage(), "_sites.json") or {"sites": []}
-    items = doc.get("sites", [])
+    from app.services.sites import registry
+    items, _source = registry(db)
     if user.role != "admin":
         permitted = set(allowed_sites(user, db))
         items = [s for s in items if s.get("id") in permitted]
@@ -107,11 +102,6 @@ def clip(site_id: str, path: str, user: User = Depends(current_user),
     """Audio proxied through the API, so the container stays private (R-5.4)."""
     assert_site_allowed(site_id, user, db)
     blob = f"sites/{site_id}/clips/{path}"
-    # LEGACY-V1-BEGIN
-    if settings().contract_version == 1:
-        from app.services import legacy_v1
-        blob = legacy_v1.clip_blob(site_id, path, settings().v1_root_site)
-    # LEGACY-V1-END
     storage = get_storage()
     if not storage.exists(blob):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "clip not found")

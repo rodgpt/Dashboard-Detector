@@ -16,6 +16,10 @@
       "title": "Config",
       "type": "object"
      },
+     "config_version": {
+      "title": "Config Version",
+      "type": "string"
+     },
      "device_id": {
       "title": "Device Id",
       "type": "string"
@@ -23,6 +27,32 @@
      "is_default": {
       "title": "Is Default",
       "type": "boolean"
+     },
+     "publish_warning": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Publish Warning"
+     },
+     "published_to": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Published To"
+     },
+     "site_id": {
+      "title": "Site Id",
+      "type": "string"
      },
      "updated_utc": {
       "anyOf": [
@@ -43,7 +73,9 @@
     },
     "required": [
      "device_id",
+     "site_id",
      "version",
+     "config_version",
      "is_default",
      "updated_utc",
      "config"
@@ -158,18 +190,6 @@
    },
    "EventsPage": {
     "properties": {
-     "contract": {
-      "anyOf": [
-       {
-        "additionalProperties": true,
-        "type": "object"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Contract"
-     },
      "has_more": {
       "title": "Has More",
       "type": "boolean"
@@ -299,6 +319,123 @@
     "title": "Ok",
     "type": "object"
    },
+   "SiteIn": {
+    "properties": {
+     "active": {
+      "default": true,
+      "title": "Active",
+      "type": "boolean"
+     },
+     "device": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Device"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "lat": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lat"
+     },
+     "lon": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lon"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "name"
+    ],
+    "title": "SiteIn",
+    "type": "object"
+   },
+   "SiteUpdate": {
+    "properties": {
+     "active": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Active"
+     },
+     "device": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Device"
+     },
+     "lat": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lat"
+     },
+     "lon": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lon"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     }
+    },
+    "title": "SiteUpdate",
+    "type": "object"
+   },
    "SitesIn": {
     "properties": {
      "sites": {
@@ -313,23 +450,6 @@
      "sites"
     ],
     "title": "SitesIn",
-    "type": "object"
-   },
-   "SitesOut": {
-    "properties": {
-     "sites": {
-      "items": {
-       "additionalProperties": true,
-       "type": "object"
-      },
-      "title": "Sites",
-      "type": "array"
-     }
-    },
-    "required": [
-     "sites"
-    ],
-    "title": "SitesOut",
     "type": "object"
    },
    "UserIn": {
@@ -438,6 +558,45 @@
      "type"
     ],
     "title": "ValidationError",
+    "type": "object"
+   },
+   "app__routers__admin__SitesOut": {
+    "properties": {
+     "sites": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Sites",
+      "type": "array"
+     },
+     "source": {
+      "title": "Source",
+      "type": "string"
+     }
+    },
+    "required": [
+     "sites",
+     "source"
+    ],
+    "title": "SitesOut",
+    "type": "object"
+   },
+   "app__routers__data__SitesOut": {
+    "properties": {
+     "sites": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Sites",
+      "type": "array"
+     }
+    },
+    "required": [
+     "sites"
+    ],
+    "title": "SitesOut",
     "type": "object"
    }
   }
@@ -590,7 +749,7 @@
     ]
    },
    "put": {
-    "description": "Full replace. Missing fields take defaults; unknown fields are an error,\nbecause a typo'd key that silently tuned nothing is a quiet failure.",
+    "description": "Tune, then publish.\n\nFull replace. Missing fields take defaults; unknown fields are an error,\nbecause a typo'd key that silently tuned nothing is a quiet failure.\n\nThe saved values are then written to `sites/{site_id}/remote_config.json`,\nsigned. That blob is the delivery path (D-020) \u2014 saving without publishing\nwould leave the panel showing a configuration no device will ever apply.",
     "operationId": "put_device_config_api_admin_devices__device_pk__config_put",
     "parameters": [
      {
@@ -638,6 +797,179 @@
      }
     },
     "summary": "Put Device Config",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/sites": {
+   "get": {
+    "operationId": "list_sites_admin_api_admin_sites_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/app__routers__admin__SitesOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "List Sites Admin",
+    "tags": [
+     "admin"
+    ]
+   },
+   "post": {
+    "operationId": "create_site_api_admin_sites_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SiteIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Create Site Api Admin Sites Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Create Site",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/sites/import": {
+   "post": {
+    "description": "Seed the table from `_sites.json`. Explicit, never automatic \u2014 see\nservices/sites.py for why.",
+    "operationId": "import_sites_api_admin_sites_import_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/app__routers__admin__SitesOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Import Sites",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/sites/{site_id}": {
+   "delete": {
+    "description": "Refuses while anything still points at it. Deleting a site out from under\na device would leave a credential valid for a site that does not exist.",
+    "operationId": "delete_site_api_admin_sites__site_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Delete Site",
+    "tags": [
+     "admin"
+    ]
+   },
+   "put": {
+    "description": "`site_id` itself is immutable: it is a storage path segment, and renaming\nit would orphan every event, clip and rollup already written under it.",
+    "operationId": "update_site_api_admin_sites__site_id__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SiteUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Update Site Api Admin Sites  Site Id  Put",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Update Site",
     "tags": [
      "admin"
     ]
@@ -879,7 +1211,7 @@
   },
   "/api/devices/config": {
    "get": {
-    "description": "Signed and clamped configuration, replacing the unsigned config blob (R-6.2, F-10).\n\nThresholds are the client's to choose; the clamping and the signing are ours\n(D-015). Payload, signature scheme and clamp table are DATA-CONTRACT.md's\n\"Device configuration\" section; this implements it and nothing beyond it.",
+    "description": "**Read-only debugging view of the configuration blob** (D-020).\n\nThis is not the delivery path. The device reads\n`sites/{site_id}/remote_config.json` from storage, which the backend writes\nwhen configuration is tuned. This route exists so an operator can see what a\nunit will receive without opening a storage browser, and it returns the blob\n**byte for byte** \u2014 reading it here and reading it from storage must never\nproduce two different documents, because that is how a signature mismatch\nhides.\n\nIt deliberately does not compose a document of its own. If the blob is\nabsent, that is the honest answer: nothing has been published for this site.",
     "operationId": "device_config_api_devices_config_get",
     "parameters": [
      {
@@ -957,7 +1289,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/SitesOut"
+         "$ref": "#/components/schemas/app__routers__data__SitesOut"
         }
        }
       },

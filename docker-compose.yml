@@ -36,7 +36,9 @@ services:
       - ./backend/app:/app/app            # hot reload in dev
       - ./backend/tests:/app/tests:ro
       - ./backend/alembic:/app/alembic    # so `make migrate` writes to the repo
-      - ./fixtures:/fixtures:ro           # local storage backend reads this
+      # Writable since D-020: the backend publishes sites/{id}/remote_config.json
+      # here, the same way it writes to a blob container in production.
+      - ./fixtures:/fixtures
     # Published for debugging only. In production the backend is internal and
     # only `frontend` is reachable — see docs/SERVER-INFRASTRUCTURE.md.
     ports:

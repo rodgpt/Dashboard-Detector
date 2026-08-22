@@ -65,7 +65,7 @@ Because nginx serves the app and proxies the API under one origin, the session c
 |---|---|
 | `DATABASE_URL` | Postgres connection |
 | `OCEANKIND_SESSION_SECRET` | signs session cookies |
-| `OCEANKIND_CONFIG_SIGNING_KEY` | signs device configuration (R-6.2). Missing = `/api/devices/config` returns 503, never an unsigned payload |
+| `OCEANKIND_CONFIG_HMAC_KEY` | signs device configuration (R-6.2). Missing = `/api/devices/config` returns 503, never an unsigned payload |
 | `OCEANKIND_AZURE_CONNECTION_STRING` | storage, when `STORAGE_BACKEND=azure` |
 | `OCEANKIND_COOKIE_SECURE` | `true` in production. `false` only for local http |
 

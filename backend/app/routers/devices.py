@@ -1,22 +1,18 @@
 """Device-facing routes. Separate credential from user sessions, so a compromised
 browser cannot write (R-6.1)."""
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlmodel import Session, select
 
 from app.core.database import get_session
-from app.core.models import Device, DeviceConfig
+from app.core.models import Device
 from app.core.security import verify_password
 from app.core.config import settings
 from app.services import deviceconfig
+from app.services.storage import get_storage
 
 router = APIRouter()
-
-# expires_utc means *refresh me*, not *stop*: past it, the device keeps the
-# config and names the staleness in health.degraded_reason (DATA-CONTRACT.md)
-CONFIG_TTL_HOURS = 24
 
 
 def current_device(x_device_key: str = Header(...), x_device_id: str = Header(...),
@@ -31,38 +27,30 @@ def current_device(x_device_key: str = Header(...), x_device_id: str = Header(..
 
 
 @router.get("/config")
-def device_config(device: Device = Depends(current_device),
-                  db: Session = Depends(get_session)):
-    """Signed and clamped configuration, replacing the unsigned config blob (R-6.2, F-10).
+def device_config(device: Device = Depends(current_device)):
+    """**Read-only debugging view of the configuration blob** (D-020).
 
-    Thresholds are the client's to choose; the clamping and the signing are ours
-    (D-015). Payload, signature scheme and clamp table are DATA-CONTRACT.md's
-    "Device configuration" section; this implements it and nothing beyond it.
+    This is not the delivery path. The device reads
+    `sites/{site_id}/remote_config.json` from storage, which the backend writes
+    when configuration is tuned. This route exists so an operator can see what a
+    unit will receive without opening a storage browser, and it returns the blob
+    **byte for byte** — reading it here and reading it from storage must never
+    produce two different documents, because that is how a signature mismatch
+    hides.
+
+    It deliberately does not compose a document of its own. If the blob is
+    absent, that is the honest answer: nothing has been published for this site.
     """
-    key = settings().config_signing_key
-    if not key:
-        # loud, and only this route: a missing signing key must not take the
-        # dashboard down, but it must never degrade to an unsigned payload
+    if not settings().config_hmac_key:
+        # Loud, and only on this route. Never a hint that unsigned would do.
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
-                            "config signing key not provisioned on the server")
+                            "config HMAC key not provisioned on the server")
 
-    row = db.exec(select(DeviceConfig)
-                  .where(DeviceConfig.device_id == device.device_id)).first()
-    stored = json.loads(row.config_json) if row else deviceconfig.DEFAULTS
-    version = row.version if row else 1
-    # stored values are already clamped; re-clamp anyway so a hand-edited
-    # database row can never reach a device outside its bounds
-    config, _ = deviceconfig.validate_and_clamp(stored)
-
-    now = datetime.now(timezone.utc)
-    payload = {
-        "schema_version": 2,
-        "device_id": device.device_id,
-        "site": device.site_id,
-        "config_version": version,
-        "issued_utc": now.isoformat(timespec="seconds"),
-        "expires_utc": (now + timedelta(hours=CONFIG_TTL_HOURS)).isoformat(timespec="seconds"),
-        "config": config,
-    }
-    payload["signature"] = deviceconfig.sign(payload, key)
-    return payload
+    path = deviceconfig.CONFIG_BLOB.format(site_id=device.site_id)
+    storage = get_storage()
+    if not storage.exists(path):
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"no configuration has been published for site '{device.site_id}'. "
+            "the device keeps its last valid configuration; it does not fall back to defaults")
+    return Response(storage.get(path), media_type="application/json")

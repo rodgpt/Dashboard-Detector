@@ -13,7 +13,8 @@ Develop against fixtures throughout: `make dev`.
 **Phase 0 complete.** Repository self-contained, fixtures generate, local loop works.
 **Phase 1 complete as backend logic.** Auth, roles, site scoping, device credentials and signed device config are built and tested. 25 backend tests pass. None of that work is affected by the restructure below.
 **Phase 1R complete — the structural correction (D-019).** This repository was scaffolded on `lyncHtmlDev`, the static-site protocol variant, and grew a backend inside it. There was no backend/frontend divide: the "frontend" was a folder of files bind-mounted into the API container, and the deployable image contained no frontend at all. Rebuilt on `lynchLocalDev`: three containers, React + Vite, Postgres + Alembic. Done 2026-08-21.
-**Azure access not granted for the client's account.** A sandbox subscription of our own is available for an end-to-end test; see Phase 4.
+**v2 only, done 2026-08-22 (D-020).** The v1 layer is deleted and device configuration is published as a signed blob, matching the canonical contract. Verified: the document verifies on an independent HMAC recompute, and the debug endpoint returns it byte for byte.
+**Azure access not granted for the client's account.** A sandbox subscription of our own, plus a bench unit emitting v2 into a fresh container, is the end-to-end test; see Phase 4.
 
 `web/` is now **superseded reference material only** — nothing in it runs or is served (see `web/README.md`). `web/static/index.html`, the client's 3,129-line v2 dashboard, is kept solely as the source for Phase 2, which rebuilds its five views as React pages. It is **deleted, not split**, once the last view leaves it.
 
@@ -97,6 +98,50 @@ The structural correction from D-019. No features change. When this lands, the r
 
 ---
 
+## Phase 1V: v2 only **COMPLETE**
+
+The cutover from D-020. Two separate jobs that happen to land together: delete the v1 layer, and move device configuration onto the transport the canonical contract specifies. Neither changes a feature. Both must land before the bench unit points at anything.
+
+The canonical `DATA-CONTRACT.md` (2026-08-22) already lists the mismatches in its own convergence table, so this is a translation with a written spec, not a design task.
+
+### V-1. Delete the v1 layer — ~1 h, mechanical, rehearsed
+
+- [x] `make drop-v1`: 11 marked blocks, `services/legacy_v1.py`, `tests/test_legacy_v1.py`
+- [x] Remove the `drop-v1` target from the Makefile and the `LEGACY-V1` block from `.env`/`.env.example`
+- [x] Drop the `contract` note section from `docs/API-CONTRACT.md` and `ContractNote` from the generated types
+- [x] `make test && make openapi types`
+
+Rehearsed on a throwaway copy 2026-08-22: 11 blocks, 3 files, 22 tests green, no dangling references.
+
+### V-2. Device config becomes a backend-written blob — ~4–6 h, the real work
+
+The contract's convergence table is the checklist. We are already correct on the version key, the signature scope, and refusing rather than publishing unsigned; the device moves on those. We move on the rest.
+
+- [x] **`Storage` gains `put(path, data, content_type)`.** It has been read-only by design — `list`, `get`, `exists` — so this widens the portability seam and every implementation changes: `LocalStorage`, `AzureBlobStorage`, and the commented S3 stub. The browser-never-writes rule is untouched
+- [x] Publish `sites/{site_id}/remote_config.json` whenever configuration is tuned, and on demand
+- [x] `config_version` becomes an arbitrary string (`"2026-08-22-01"`), not a monotonic integer. The device re-applies when it *differs*, not when it increases
+- [x] Drop `expires_utc`. There is no expiry: a configuration stays in force until a different `config_version` verifies
+- [x] Add `window_hop_s`, clamp 1.0–5.0, default 5.0. Tenth key, so the panel grows a field
+- [x] `device_id` becomes optional; `null` means the document applies to the whole site. Configuration is addressed per **site**, with an optional device narrowing — our model is currently per-device only
+- [x] Rename `OCEANKIND_CONFIG_HMAC_KEY` to `OCEANKIND_CONFIG_HMAC_KEY` everywhere
+- [x] `GET /api/devices/config` survives only as a read-only debugging view and must return byte-identical content to the blob
+- [x] Tests: published blob verifies against an independent HMAC recompute; refuses to publish with no key; a clamped tune is what lands in the blob
+
+### V-3. Consequential — ~1–2 h
+
+- [x] `?play=` retargeted at v2 clip paths (R-8.5 revised). A missing or never-kept clip must fail visibly
+- [x] Suppressed events carry a `clip.path` whose audio was deliberately never kept — the UI must not offer playback that will 404
+- [x] Confirm `health` extra fields pass through untouched (`deaf_seconds_total`, `suppressed_count`, `events_dropped`, `wa_pending`, `archive_queue`, `capture_overflows`). The no-`response_model` rule should already cover this; assert it
+- [x] `status.json → audio.device` is a selection rule string (`by-name:…`), never an ALSA index. Display only
+
+### Open, needs one decision — not blocking the bench test
+
+- [ ] The device merges its own entry into `_sites.json` at startup. The backend now owns the registry in Postgres and ignores the blob whenever the table has rows, so a self-registering device would not appear. Either the backend imports on a schedule, or the panel surfaces "seen in storage, not registered", or the device stops writing it
+
+**Done when:** no v1 remains in the tree, the backend publishes a signed `remote_config.json` that verifies on an independent recompute, and the bench unit can read its configuration from storage without an API call.
+
+---
+
 ## Phase 2: The five views, in React **NOT STARTED**
 
 The client's five views are rebuilt as React pages reading the API. The 3,129-line monolith is deleted when the last view leaves it. No new features — this is the same product, correctly built.
@@ -159,12 +204,12 @@ Ships simultaneously with the device's Phase 4. Not before, not after.
 
 These were found by inspecting the image and the storage seam rather than by deploying. Each one makes a deployment either fail or be quietly useless.
 
-- [ ] **The image ships no frontend.** `api/Dockerfile` copies `app/` only; the compiled interface reaches the running container purely through the `./web/dist:/web:ro` mount in `docker-compose.yml`. `main.py` guards the static routes with `if WEB_DIR.is_dir()`, which is false in the image, so a deployed container serves the API and returns 404 for `/`, `/login` and `/admin`. Needs a multi-stage build (node compile then copy) or a copy of a prebuilt `dist`
-- [ ] **`_sites.json` has no author outside fixtures.** Only `tools/generate_fixtures.py` writes it. A fresh private container has no site registry, so `GET /api/sites` returns empty, the dashboard shows nothing, and `POST /api/admin/devices` rejects every device with "unknown site (known: none)". Seed it as a provisioning step, or give it a writer. Sites are data (R-3.1), so a hardcoded fallback is not the answer
-- [ ] **SQLite sits on an ephemeral filesystem.** `sqlite:////data/oceankind.db` survives locally because `./data` is a bind mount. On Azure Container Apps (and most container hosts) the filesystem is ephemeral, so every restart or scale event destroys users, device credentials and tuned device configs. Decide: Azure Files volume, or Postgres by connection string (R-9.2 allows either)
+- [x] **The image ships no frontend.** Fixed by Phase 1R: the frontend is its own image. Was — `api/Dockerfile` copies `app/` only; the compiled interface reaches the running container purely through the `./web/dist:/web:ro` mount in `docker-compose.yml`. `main.py` guards the static routes with `if WEB_DIR.is_dir()`, which is false in the image, so a deployed container serves the API and returns 404 for `/`, `/login` and `/admin`. Needs a multi-stage build (node compile then copy) or a copy of a prebuilt `dist`
+- [x] **Site registry is manageable.** Sites live in Postgres and are created, deactivated and deleted in the admin panel; `_sites.json` stays a read fallback so a fixture tree still works with no setup, and `POST /api/admin/sites/import` seeds the table from it. Verified against a genuinely empty container: register a site, then a device, no blob involved. Deleting a site referenced by a device or a user assignment is refused (2026-08-21)
+- [x] **SQLite sits on an ephemeral filesystem.** Fixed by Phase 1R: Postgres with a named volume. Was — `sqlite:////data/oceankind.db` survives locally because `./data` is a bind mount. On Azure Container Apps (and most container hosts) the filesystem is ephemeral, so every restart or scale event destroys users, device credentials and tuned device configs. Decide: Azure Files volume, or Postgres by connection string (R-9.2 allows either)
 - [ ] **Single replica is a correctness requirement, not a cost choice.** `core/ratelimit.py` counts login failures in process memory and says so in its own docstring; two replicas means the R-2.4 throttle is bypassable by reconnecting. SQLite imposes the same limit. Pin to one replica and write down why
-- [ ] **`get_storage()` builds a new client per request.** It is not cached, so the Azure backend constructs a fresh `ContainerClient` — new HTTP pipeline, re-parsed credential — on every single request. Free with `LocalStorage`, expensive against a real account. Cache it per process alongside `settings()`
-- [ ] **No timeout on storage calls.** A hung blob read hangs the request with nothing to bound it
+- [x] **`get_storage()` cached per process** with `lru_cache`, so the Azure client and its HTTP pipeline are built once, not per request (2026-08-21)
+- [x] **Timeouts on storage calls**: 10 s connect, 60 s read on the Azure client, so a hung blob read cannot hold a request open indefinitely (2026-08-21)
 
 ### Then
 

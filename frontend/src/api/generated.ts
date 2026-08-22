@@ -54,12 +54,83 @@ export interface paths {
         get: operations["get_device_config_api_admin_devices__device_pk__config_get"];
         /**
          * Put Device Config
-         * @description Full replace. Missing fields take defaults; unknown fields are an error,
+         * @description Tune, then publish.
+         *
+         *     Full replace. Missing fields take defaults; unknown fields are an error,
          *     because a typo'd key that silently tuned nothing is a quiet failure.
+         *
+         *     The saved values are then written to `sites/{site_id}/remote_config.json`,
+         *     signed. That blob is the delivery path (D-020) — saving without publishing
+         *     would leave the panel showing a configuration no device will ever apply.
          */
         put: operations["put_device_config_api_admin_devices__device_pk__config_put"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sites Admin */
+        get: operations["list_sites_admin_api_admin_sites_get"];
+        put?: never;
+        /** Create Site */
+        post: operations["create_site_api_admin_sites_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/sites/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Sites
+         * @description Seed the table from `_sites.json`. Explicit, never automatic — see
+         *     services/sites.py for why.
+         */
+        post: operations["import_sites_api_admin_sites_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/sites/{site_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Site
+         * @description `site_id` itself is immutable: it is a storage path segment, and renaming
+         *     it would orphan every event, clip and rollup already written under it.
+         */
+        put: operations["update_site_api_admin_sites__site_id__put"];
+        post?: never;
+        /**
+         * Delete Site
+         * @description Refuses while anything still points at it. Deleting a site out from under
+         *     a device would leave a credential valid for a site that does not exist.
+         */
+        delete: operations["delete_site_api_admin_sites__site_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -177,11 +248,18 @@ export interface paths {
         };
         /**
          * Device Config
-         * @description Signed and clamped configuration, replacing the unsigned config blob (R-6.2, F-10).
+         * @description **Read-only debugging view of the configuration blob** (D-020).
          *
-         *     Thresholds are the client's to choose; the clamping and the signing are ours
-         *     (D-015). Payload, signature scheme and clamp table are DATA-CONTRACT.md's
-         *     "Device configuration" section; this implements it and nothing beyond it.
+         *     This is not the delivery path. The device reads
+         *     `sites/{site_id}/remote_config.json` from storage, which the backend writes
+         *     when configuration is tuned. This route exists so an operator can see what a
+         *     unit will receive without opening a storage browser, and it returns the blob
+         *     **byte for byte** — reading it here and reading it from storage must never
+         *     produce two different documents, because that is how a signature mismatch
+         *     hides.
+         *
+         *     It deliberately does not compose a document of its own. If the blob is
+         *     absent, that is the honest answer: nothing has been published for this site.
          */
         get: operations["device_config_api_devices_config_get"];
         put?: never;
@@ -352,10 +430,18 @@ export interface components {
             config: {
                 [key: string]: unknown;
             };
+            /** Config Version */
+            config_version: string;
             /** Device Id */
             device_id: string;
             /** Is Default */
             is_default: boolean;
+            /** Publish Warning */
+            publish_warning?: string | null;
+            /** Published To */
+            published_to?: string | null;
+            /** Site Id */
+            site_id: string;
             /** Updated Utc */
             updated_utc: string | null;
             /** Version */
@@ -398,10 +484,6 @@ export interface components {
         };
         /** EventsPage */
         EventsPage: {
-            /** Contract */
-            contract?: {
-                [key: string]: unknown;
-            } | null;
             /** Has More */
             has_more: boolean;
             /** Items */
@@ -453,17 +535,41 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** SiteIn */
+        SiteIn: {
+            /**
+             * Active
+             * @default true
+             */
+            active: boolean;
+            /** Device */
+            device?: string | null;
+            /** Id */
+            id: string;
+            /** Lat */
+            lat?: number | null;
+            /** Lon */
+            lon?: number | null;
+            /** Name */
+            name: string;
+        };
+        /** SiteUpdate */
+        SiteUpdate: {
+            /** Active */
+            active?: boolean | null;
+            /** Device */
+            device?: string | null;
+            /** Lat */
+            lat?: number | null;
+            /** Lon */
+            lon?: number | null;
+            /** Name */
+            name?: string | null;
+        };
         /** SitesIn */
         SitesIn: {
             /** Sites */
             sites: string[];
-        };
-        /** SitesOut */
-        SitesOut: {
-            /** Sites */
-            sites: {
-                [key: string]: unknown;
-            }[];
         };
         /** UserIn */
         UserIn: {
@@ -510,6 +616,22 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** SitesOut */
+        app__routers__admin__SitesOut: {
+            /** Sites */
+            sites: {
+                [key: string]: unknown;
+            }[];
+            /** Source */
+            source: string;
+        };
+        /** SitesOut */
+        app__routers__data__SitesOut: {
+            /** Sites */
+            sites: {
+                [key: string]: unknown;
+            }[];
         };
     };
     responses: never;
@@ -658,6 +780,147 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DeviceConfigOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sites_admin_api_admin_sites_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["app__routers__admin__SitesOut"];
+                };
+            };
+        };
+    };
+    create_site_api_admin_sites_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_sites_api_admin_sites_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["app__routers__admin__SitesOut"];
+                };
+            };
+        };
+    };
+    update_site_api_admin_sites__site_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_site_api_admin_sites__site_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -927,7 +1190,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SitesOut"];
+                    "application/json": components["schemas"]["app__routers__data__SitesOut"];
                 };
             };
         };

@@ -9,9 +9,6 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-# LEGACY-V1-BEGIN
-from app.core.config import settings as _settings
-# LEGACY-V1-END
 from app.services.storage import Storage
 
 SCHEMA_VERSION = 2
@@ -37,13 +34,6 @@ def list_events(
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    # LEGACY-V1-BEGIN
-    if _settings().contract_version == 1:
-        from app.services import legacy_v1
-        return legacy_v1.list_events(storage, site, _settings().v1_root_site,
-                                     since, until, event_type, min_score,
-                                     include_suppressed, limit, offset)
-    # LEGACY-V1-END
 
     until = until or datetime.now(timezone.utc)
     since = since or (until - timedelta(days=7))
@@ -90,12 +80,6 @@ def list_events(
 def read_json(storage: Storage, path: str) -> Optional[dict]:
     """Single rollup blob. Returns None rather than raising, so one missing file
     never takes the rest of the dashboard down (R-7.3)."""
-    # LEGACY-V1-BEGIN
-    if _settings().contract_version == 1:
-        from app.services import legacy_v1
-        s = _settings()
-        return legacy_v1.read_blob(storage, path, s.v1_root_site, s.v1_site_list())
-    # LEGACY-V1-END
     try:
         return json.loads(storage.get(path))
     except Exception:

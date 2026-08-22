@@ -20,6 +20,7 @@ const FIELDS: { key: keyof Omit<DeviceConfig, "detection_mode">; label: string; 
   { key: "psd_f_max",            label: "Frecuencia máxima PSD (Hz)", min: 100,   max: 20000 },
   { key: "cooldown_s",           label: "Pausa entre avisos (s)",     min: 10,    max: 3600 },
   { key: "heartbeat_interval_s", label: "Intervalo de latido (s)",    min: 30,    max: 3600 },
+  { key: "window_hop_s",         label: "Salto entre ventanas (s)",   min: 1,     max: 5 },
 ];
 
 export default function DeviceConfigEditor({ deviceId, onClose }: {
@@ -61,12 +62,12 @@ export default function DeviceConfigEditor({ deviceId, onClose }: {
     try {
       const updated = await admin.setDeviceConfig(deviceId, body as unknown as DeviceConfig);
       adopt(updated);   // el servidor es la verdad, ajustes incluidos
-      setFeedback({
-        kind: "ok",
-        text: updated.clamp_notes.length
-          ? `Guardada (versión ${updated.version}). Valores ajustados al rango permitido: ${updated.clamp_notes.join("; ")}`
-          : `Guardada (versión ${updated.version}).`,
-      });
+      const parts = [`Guardada y publicada (versión ${updated.config_version}).`];
+      if (updated.clamp_notes.length) {
+        parts.push(`Valores ajustados al rango permitido: ${updated.clamp_notes.join("; ")}`);
+      }
+      if (updated.publish_warning) parts.push(`Atención: ${updated.publish_warning}`);
+      setFeedback({ kind: updated.publish_warning ? "error" : "ok", text: parts.join(" ") });
     } catch (err) {
       setFeedback({ kind: "error", text: messageFor(err, "No se pudo guardar.") });
     } finally {
@@ -89,8 +90,8 @@ export default function DeviceConfigEditor({ deviceId, onClose }: {
     <div className="row-editor">
       <p className="hint">
         {state.is_default
-          ? "Configuración por defecto (versión 1). Aún nadie la ha ajustado."
-          : `Versión ${state.version}. El equipo la aplica en su próxima consulta.`}
+          ? "Configuración por defecto. Aún nadie la ha ajustado, y no hay ningún documento publicado para este sitio."
+          : `Versión ${state.config_version}. Publicada en ${state.published_to ?? "almacenamiento"}; el equipo la aplica en su próxima consulta (cada 300 s).`}
       </p>
 
       <div className="form-grid">

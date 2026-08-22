@@ -7,13 +7,15 @@
 import { useCallback, useEffect, useState } from "react";
 import AppHeader from "@/components/AppHeader";
 import { useAuth } from "@/auth/AuthContext";
-import { admin, data, ApiError, type AdminDevice, type AdminUser, type Site } from "@/api/client";
+import { admin, ApiError, type AdminDevice, type AdminUser, type Site, type SitesSource } from "@/api/client";
+import SitesPanel from "@/pages/Admin/SitesPanel";
 import UsersPanel from "@/pages/Admin/UsersPanel";
 import DevicesPanel from "@/pages/Admin/DevicesPanel";
 
 export default function Admin() {
   const { me } = useAuth();
   const [sites, setSites] = useState<Site[]>([]);
+  const [sitesSource, setSitesSource] = useState<SitesSource>("empty");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [devices, setDevices] = useState<AdminDevice[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -25,10 +27,10 @@ export default function Admin() {
     setLoading(true);
     setErrors([]);
     // Independientes a propósito: si una fuente falla, las otras se muestran (R-7.3)
-    const [s, u, d] = await Promise.allSettled([data.sites(), admin.users(), admin.devices()]);
+    const [s, u, d] = await Promise.allSettled([admin.sites(), admin.users(), admin.devices()]);
     const failed: string[] = [];
 
-    if (s.status === "fulfilled") setSites(s.value.sites);
+    if (s.status === "fulfilled") { setSites(s.value.sites); setSitesSource(s.value.source); }
     else failed.push("No se pudo cargar la lista de sitios. Las asignaciones no se pueden editar.");
 
     if (u.status === "fulfilled") setUsers(u.value);
@@ -72,6 +74,11 @@ export default function Admin() {
         <div className="loading">Cargando…</div>
       ) : (
         <>
+          <SitesPanel
+            sites={sites} source={sitesSource}
+            onChanged={(next, source) => { setSites(next); setSitesSource(source); }}
+            onError={(m) => setErrors((p) => [...p, m])}
+          />
           <UsersPanel
             sites={sites} users={users} meEmail={me.email}
             onChanged={setUsers} onError={(m) => setErrors((p) => [...p, m])}

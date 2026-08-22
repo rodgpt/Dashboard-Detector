@@ -1,16 +1,21 @@
-"""Device configuration: defaults, clamping and signing (R-6.2, F-10, D-014).
+"""Device configuration: defaults, clamping, signing and publication (R-6.2).
 
-The client chooses threshold values; we bound and sign them. The clamp table
-below is the implementation of the one in DATA-CONTRACT.md — change them
-together or not at all. Clamping happens here, server-side, before signing,
-so the device and the operator always see the same number in force.
+The client chooses threshold values; we bound them and sign them (D-015). The
+tables below implement the ones in `DATA-CONTRACT.md` under **Device
+configuration** — change them together or not at all.
+
+**Transport is storage, not HTTP** (D-020). The backend writes
+`sites/{site_id}/remote_config.json`; the device polls it every 300 s and
+applies a document only when `config_version` differs from the one in force.
+`GET /api/devices/config` still exists but is a read-only debugging view and
+must return byte-identical content.
 """
 import hashlib
 import hmac
 import json
+from datetime import datetime, timezone
 
-# The values in force when nobody has tuned anything. Same table as
-# DATA-CONTRACT.md "Device configuration".
+# The values in force when nobody has tuned anything.
 DEFAULTS: dict = {
     "detection_mode":       "psd",
     "score_min":            0.60,
@@ -21,11 +26,12 @@ DEFAULTS: dict = {
     "psd_f_max":            1000.0,
     "cooldown_s":           60.0,
     "heartbeat_interval_s": 60.0,
+    "window_hop_s":         5.0,
 }
 
 # field -> (low, high). Out of range is clamped to the nearest bound and
 # reported, never silently accepted and never rejected: a tuning mistake must
-# not leave the device on stale config.
+# not strand a unit on stale config.
 CLAMPS: dict[str, tuple[float, float]] = {
     "score_min":            (0.05, 0.95),
     "alert_min_rms":        (0.0, 0.20),
@@ -35,9 +41,15 @@ CLAMPS: dict[str, tuple[float, float]] = {
     "psd_f_max":            (100.0, 20000.0),
     "cooldown_s":           (10.0, 3600.0),
     "heartbeat_interval_s": (30.0, 3600.0),
+    # 5.0 is back-to-back windows, the calibrated behaviour. Below 5 they
+    # overlap so an event up to 5-h s always lands whole in one window, at
+    # CPU cost x(5/h). Measure on the bench before lowering.
+    "window_hop_s":         (1.0, 5.0),
 }
 
 MODES = ("psd", "rms", "auto")
+
+CONFIG_BLOB = "sites/{site_id}/remote_config.json"
 
 
 class ConfigError(ValueError):
@@ -46,7 +58,7 @@ class ConfigError(ValueError):
 
 
 def validate_and_clamp(raw: dict) -> tuple[dict, list[str]]:
-    """Full config in, (clamped config, human-readable adjustment notes) out.
+    """Config in, (clamped config, human-readable adjustment notes) out.
 
     Unknown keys and malformed values are errors, not omissions: a typo'd key
     that silently failed to tune anything is the quiet failure this system
@@ -86,9 +98,48 @@ def validate_and_clamp(raw: dict) -> tuple[dict, list[str]]:
     return cfg, notes
 
 
-def sign(payload: dict, key: str) -> str:
-    """Hex HMAC-SHA256 over the canonical serialisation, `signature` excluded:
-    UTF-8, keys sorted, no whitespace. The device recomputes this exactly."""
-    body = {k: v for k, v in payload.items() if k != "signature"}
+def sign(document: dict, key: str) -> str:
+    """Hex HMAC-SHA256 over the canonical serialisation of the whole document
+    with `signature` excluded: UTF-8, keys sorted, no whitespace.
+
+    The device recomputes exactly this and compares with `compare_digest`. Both
+    sides must canonicalise the *same object* — canonicalising different
+    subsets is precisely how configuration stops applying with nothing logged.
+    """
+    body = {k: v for k, v in document.items() if k != "signature"}
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     return hmac.new(key.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+
+
+def build_document(site_id: str, config: dict, config_version: str, key: str,
+                   device_id: str | None = None) -> dict:
+    """The exact document the contract specifies, signed.
+
+    `device_id` is optional: `None` means the document applies to every device
+    at the site, which is the common case. There is no `expires_utc` — a
+    configuration stays in force until a different `config_version` verifies.
+    Stale and detecting beats fresh and silent.
+    """
+    doc = {
+        "schema_version": 2,
+        "config_version": config_version,
+        "site": site_id,
+        "device_id": device_id,
+        "issued_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "config": config,
+    }
+    doc["signature"] = sign(doc, key)
+    return doc
+
+
+def serialise(document: dict) -> bytes:
+    """What actually gets written. Canonical too, so the bytes in storage and
+    the bytes the debugging endpoint returns are identical."""
+    return json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+
+
+def publish(storage, site_id: str, document: dict) -> str:
+    """Write the signed document to storage. Returns the blob path."""
+    path = CONFIG_BLOB.format(site_id=site_id)
+    storage.put(path, serialise(document), "application/json")
+    return path

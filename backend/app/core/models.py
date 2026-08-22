@@ -29,6 +29,28 @@ class SiteAccess(SQLModel, table=True):
     site_id: str = Field(index=True)
 
 
+class Site(SQLModel, table=True):
+    """The site registry (R-3.1: adding a unit is a data change, not a code one).
+
+    Authoritative here rather than in `_sites.json`, because a registry that can
+    only be edited by hand-uploading a blob is not manageable, and on a fresh
+    storage container it does not exist at all — which left no way to register
+    the first device. `_sites.json` remains a read fallback; see services/sites.py.
+
+    `site_id` is the storage path segment (`sites/{site_id}/...`), so it is the
+    natural key and it is what the API returns as `id`.
+    """
+    site_id: str = Field(primary_key=True)
+    name: str
+    # Coordinates live here rather than on the device, which is what closes F-08
+    # properly. Both nullable: an unsurveyed site is honest, 0,0 is not.
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    device: Optional[str] = None
+    active: bool = True
+    created_at: datetime = Field(default_factory=_now)
+
+
 class Device(SQLModel, table=True):
     """Per-device credential, separate from user sessions (R-6.1)."""
     id: Optional[int] = Field(default=None, primary_key=True)

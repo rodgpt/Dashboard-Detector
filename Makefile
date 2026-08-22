@@ -1,4 +1,4 @@
-.PHONY: help dev up down logs rebuild fixtures test migrate upgrade psql openapi types contract drop-v1
+.PHONY: help dev up down logs rebuild fixtures test migrate upgrade psql openapi types contract
 
 help:
 	@echo "  make dev        fixtures + db + backend + frontend, all three up"
@@ -14,7 +14,6 @@ help:
 	@echo "  make openapi    regenerate docs/openapi.json from the code"
 	@echo "  make types      regenerate frontend/src/api/generated.ts from openapi.json"
 	@echo "  make contract   check DATA-CONTRACT.md matches the canonical copy (R-10.1)"
-	@echo "  make drop-v1    delete the v1 compatibility layer once devices write v2"
 
 fixtures:
 	python3 tools/generate_fixtures.py --out fixtures
@@ -71,6 +70,3 @@ contract:
 	  && echo "DATA-CONTRACT.md in sync with the canonical copy" \
 	  || (echo "DATA-CONTRACT.md has drifted from _Rpi-Detector"; exit 1)
 
-# LEGACY-V1: removes itself. See tools/drop_v1.py
-drop-v1:
-	python3 tools/drop_v1.py

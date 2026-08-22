@@ -68,15 +68,10 @@ export interface DetectionEvent {
   _unknown_schema?: boolean;
 }
 
-/** Present only while the backend reads the v1 layout. See D-016. */
-export interface ContractNote {
-  version: number; normalized_to: number; unknown_fields: string[];
-  time_is_upload: boolean; suppressed_undercounts: boolean; note: string;
-}
 
 export interface Page<T> {
   items: T[]; total: number; limit: number; offset: number;
-  has_more: boolean; scanned_blobs: number; contract?: ContractNote | null;
+  has_more: boolean; scanned_blobs: number;
 }
 
 export interface Me { email: string; role: "operator" | "admin"; sites: string[]; }
@@ -85,6 +80,12 @@ export interface AdminUser {
   id: number; email: string; role: "operator" | "admin";
   active: boolean; sites: string[];
 }
+
+/** Where the site registry came from. "storage" means it is still the
+ *  `_sites.json` fallback and nobody has managed it yet. */
+export type SitesSource = "database" | "storage" | "empty";
+
+export interface AdminSites { sites: Site[]; source: SitesSource; }
 
 export interface AdminDevice {
   id: number; device_id: string; site_id: string;
@@ -99,12 +100,22 @@ export interface DeviceConfig {
   detection_mode: "psd" | "rms" | "auto";
   score_min: number; alert_min_rms: number; alert_threshold: number;
   psd_threshold_db: number; psd_f_min: number; psd_f_max: number;
-  cooldown_s: number; heartbeat_interval_s: number;
+  cooldown_s: number; heartbeat_interval_s: number; window_hop_s: number;
 }
 
 export interface DeviceConfigState {
-  device_id: string; version: number; is_default: boolean;
-  updated_utc: string | null; config: DeviceConfig; clamp_notes: string[];
+  device_id: string; site_id: string;
+  version: number;
+  /** What the device compares. Opaque string; changes on every tune. */
+  config_version: string;
+  is_default: boolean;
+  updated_utc: string | null;
+  config: DeviceConfig;
+  clamp_notes: string[];
+  /** Blob path the signed document was written to. Transport is storage (D-020). */
+  published_to: string | null;
+  /** Set when the site holds other devices and this publish replaced their document. */
+  publish_warning: string | null;
 }
 
 // ── calls ───────────────────────────────────────────────────────────────────
@@ -153,6 +164,15 @@ export const admin = {
   setSites: (id: number, sites: string[]) =>
     req<AdminUser>(`/admin/users/${id}/sites`, { method: "PUT", ...json({ sites }) }),
   deleteUser: (id: number) => req<void>(`/admin/users/${id}`, { method: "DELETE" }),
+
+  sites: () => req<AdminSites>("/admin/sites"),
+  createSite: (b: { id: string; name: string; lat?: number | null; lon?: number | null;
+                    device?: string | null; active?: boolean }) =>
+    req<Site>("/admin/sites", { method: "POST", ...json(b) }),
+  updateSite: (id: string, b: Partial<Omit<Site, "id">>) =>
+    req<Site>(`/admin/sites/${id}`, { method: "PUT", ...json(b) }),
+  deleteSite: (id: string) => req<void>(`/admin/sites/${id}`, { method: "DELETE" }),
+  importSites: () => req<AdminSites>("/admin/sites/import", { method: "POST" }),
 
   devices: () => req<AdminDevice[]>("/admin/devices"),
   createDevice: (b: { device_id: string; site_id: string }) =>

@@ -33,6 +33,7 @@ Domain-only choices that affect nothing outside their folder can live in that fo
 | D-017 | DECIDED | Device credential provisioning on the bench, through the issuance API | R-6.1 shape |
 | D-018 | PROPOSED | Fleet-scale credential lifecycle: rotation over the wire, enrollment | R-6.3 scope |
 | D-019 | DECIDED | Wrong protocol variant. Rebuild on `lynchLocalDev`: real backend/frontend divide | R-9, every phase |
+| D-020 | DECIDED | v2 only. Delete the v1 layer; device config becomes a backend-written blob | R-6.2, R-11, D-016 |
 
 ---
 
@@ -409,3 +410,38 @@ Frontend stack is the protocol default: **React 18 + TypeScript + Vite**, with `
 **What this does not excuse.** The variant was wrong from the first commit, and the evidence was in the repository the whole time — in `CLAUDE.md`'s own "extended" caveat and in the `TODO.md` note. Several sessions of work were spent adding features inside a structure that should have been challenged instead.
 
 **Trickles into.** `CLAUDE.md`, `README.md`, `REQUIREMENTS.md` R-9, `docs/PROGRESS.md` (re-phased), `docs/STYLEGUIDE.md`, `docs/API-CONTRACT.md` (origin and proxy model), and a new `docs/SERVER-INFRASTRUCTURE.md` per the `lynchLocalDev` doc set.
+
+
+---
+
+## D-020 — v2 only, and device configuration moves to a blob
+
+**Status:** DECIDED, 2026-08-22. Supersedes D-016.
+
+**Context.** D-016 had the dashboard read v1 through a removable adapter, because the production units were writing v1 and the client owned deployment. That premise is gone: **neither we nor the client can reach the v1 unit.** A compatibility layer whose only purpose is to read a container nobody can act on is dead weight, and it is weight on the critical path.
+
+Meanwhile the canonical `DATA-CONTRACT.md` was rewritten on 2026-08-22 and is now explicit: *"v2 is the only contract… There is no v1 anywhere in the build… If code in either repository transforms an older shape, that code is out of date, not this document."* The device side is verified end to end by `v2_conformance_test.py` and is shipping. A bench unit is being built to emit v2 into a new test container.
+
+**Decision.** The dashboard is v2-only. `make drop-v1` runs, and the layer goes.
+
+**Consequence: R-11 is withdrawn**, having done its job. It was a good rule while the premise held — v1 never crossed the storage boundary, so nothing downstream grew a dependency on it, and the removal is mechanical precisely because of that discipline. Rehearsed on a copy: 11 blocks, 3 files, 22 tests still green, no dangling references.
+
+**Consequence: the prototype history becomes an offline import, not a live mode.** The contract's own position, and the right one — the old container is frozen and in a different account. If that history is ever wanted it is a one-off script writing `event_type: "unknown"`, `detector: "unknown"`, because those were never recorded. It is an analysis task and it belongs to neither codebase.
+
+**Second decision, forced by the same contract rewrite: device configuration is a blob, not an endpoint.**
+
+The contract now specifies `sites/{site_id}/remote_config.json`, **written by the backend**, polled by the device every 300 s. We built `GET /api/devices/config` instead (R-6.2, 2026-08-18), and the contract names the mismatch directly: *"nothing writes the blob… Point the device at the API today and every document fails its signature check, because the two sides canonicalise different objects. Nothing would log an incompatibility; configuration would simply stop applying."*
+
+That is the exact failure class this project exists to remove, so it is not a preference. The blob is normative: the device side is verified and shipping, and blob transport needs no device credential to exist first.
+
+Where we were already right, and the device must move instead: the version key is `config_version`, the signature covers the whole document minus `signature`, and a missing key means refuse rather than apply unsigned. Where we must move: the transport, and the key's environment variable name becomes `OCEANKIND_CONFIG_HMAC_KEY`.
+
+**Consequence: `Storage` gains a write.** It has been read-only — `list`, `get`, `exists` — which was a deliberate property. Writing one blob per site changes that, and it changes it for every implementation, so it is recorded here rather than slipped in. The hard rule that *the browser* never writes to storage is untouched.
+
+**Consequence: `GET /api/devices/config` survives only as a read-only debugging view**, and must return byte-identical content to the blob. It stops being the delivery path.
+
+**Left open, deliberately.** The device merges its own entry into `_sites.json` at startup, which the contract calls "tolerable until the backend owns the registry" — and the backend now owns it (Postgres, 2026-08-21). A self-registering device therefore lands in a blob the backend ignores whenever the table has rows. Needs one decision, not urgent before the bench test.
+
+**Also left open.** The per-device credential (R-6.1, D-017) currently has exactly one consumer, and this decision removes it. It is kept: it is the foundation for R-6.3 event upload, and revoking a unit's access is worth having regardless. But it is now infrastructure ahead of its use, and that should be said out loud rather than discovered later.
+
+**Trickles into.** `REQUIREMENTS.md` (R-11 withdrawn, R-6.2 restated), `docs/API-CONTRACT.md`, `docs/PROGRESS.md` (new Phase 1V), `backend/app/services/storage.py`, `backend/app/services/deviceconfig.py`, `backend/app/routers/devices.py`, `.env.example`.

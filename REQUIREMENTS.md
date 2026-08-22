@@ -2,13 +2,13 @@
 
 A dashboard with authentication, backed by an API we own, that runs anywhere.
 
-`MUST` is contracted. `SHOULD` is expected unless there's a reason. Last updated 2026-08-10.
+`MUST` is contracted. `SHOULD` is expected unless there's a reason. Last updated 2026-08-22.
 
 ---
 
 ## Scope
 
-One deployable unit: a FastAPI backend serving a TypeScript frontend, in a container. It authenticates users, holds every secret, and serves paginated data read from blob storage.
+Three containers: a Postgres database, a FastAPI backend serving JSON only, and a React frontend served by nginx which proxies `/api/` to the backend. The backend authenticates users, holds every secret, and serves paginated data read from blob storage (D-019).
 
 **Portable by construction.** No cloud-specific auth, no cloud-specific runtime. Azure today because that's where the storage is. AWS, or your own server, by changing an environment variable and one storage class.
 
@@ -64,7 +64,7 @@ We build the plumbing. The client provides the detection science.
 
 ## R-4 Secrets
 
-**R-4.1 MUST** hold every secret server-side: storage credentials, Twilio, the session signing key, the device config signing key, per-device keys.
+**R-4.1 MUST** hold every secret server-side: storage credentials, Twilio, the session signing key, the device config HMAC key (`OCEANKIND_CONFIG_HMAC_KEY`), per-device keys.
 
 **R-4.2 MUST NOT** ever send a secret, a storage credential or a SAS token to the browser.
 
@@ -98,7 +98,11 @@ We build the plumbing. The client provides the detection science.
 
 **R-6.1 MUST** authenticate devices separately from users, with a per-device credential. A compromised browser session cannot write.
 
-**R-6.2 MUST** serve signed, clamped configuration to devices, replacing the unsigned config blob (F-10).
+**R-6.2 MUST** publish signed, clamped configuration to devices by **writing `sites/{site_id}/remote_config.json`**, which the device polls and verifies. Replaces the unsigned, unclamped config blob that anything holding the storage key could rewrite (F-10).
+
+*Revised 2026-08-22 (D-020).* This was built as `GET /api/devices/config`. The canonical contract specifies blob transport, and the two sides canonicalise different objects, so pointing the device at the endpoint would fail every signature check **silently** — configuration would simply stop applying. The endpoint may remain as a read-only debugging view returning byte-identical content.
+
+**R-6.2.1 MUST** hold the signing key in `OCEANKIND_CONFIG_HMAC_KEY`, and refuse to publish rather than publish unsigned when it is absent.
 
 **R-6.3 SHOULD** accept event uploads from devices, so the device stops needing storage credentials of its own.
 
@@ -126,7 +130,9 @@ We build the plumbing. The client provides the detection science.
 
 **R-8.4 MUST** display `captured_utc` as the event time, not upload time.
 
-**R-8.5 MUST** keep `?play=` deep links working. Links already sent over WhatsApp must keep resolving.
+**R-8.5 MUST** support `?play=` deep links against **v2** clip paths, so a link shared from the dashboard resolves for anyone with permission on that site.
+
+*Revised 2026-08-22 (D-020).* This previously required links already sent over WhatsApp to keep resolving. Those point at v1 blob names in the prototype container, which is frozen, in a different account, and read by nothing we ship — the canonical contract states "no deep-link preservation across the boundary". They cannot resolve and pretending otherwise would be the false claim, not the broken link. A link to a clip that is absent must say so visibly (R-7.1), which also covers the suppressed case: a suppressed event carries a `clip.path` whose audio was deliberately never kept.
 
 **R-8.6 MUST** preserve gaps in power history. Absent buckets are how outages are detected; never interpolate.
 
@@ -166,17 +172,13 @@ We build the plumbing. The client provides the detection science.
 
 ---
 
-## R-11 Contract compatibility (temporary)
+## R-11 Contract compatibility — WITHDRAWN 2026-08-22 (D-020)
 
-**R-11.1 MUST** read the v1 blob layout and return v2 shapes, so the interface can be built once, against v2, while the production units still write v1 (D-016).
+Required the backend to read the v1 blob layout and return v2 shapes while the production units still wrote v1. **The premise is gone:** neither we nor the client can reach the v1 unit, and the canonical `DATA-CONTRACT.md` is now v2-only and normative.
 
-**R-11.2 MUST** confine every line of v1 knowledge to one module and marked blocks. No router, response model or frontend file may contain a v1 field name.
+It did its job. R-11.2 confined every line of v1 knowledge to one module and marked blocks, which is exactly why the removal was mechanical rather than archaeological — 11 blocks, 3 files, no dangling references, the v2 suite green.
 
-*Test:* `make drop-v1` removes the layer entirely and the v2 test suite still passes.
-
-**R-11.3 MUST** report what v1 cannot supply rather than substituting a plausible value. `event_type` and `detector` read `unknown`, suppressed totals are declared as undercounts, and upload-time timestamps are flagged.
-
-**R-11.4 MUST** be selectable by a single environment variable, validated at boot, never auto-detected.
+Reading the frozen prototype container, if it is ever wanted, is a one-off offline import and belongs to neither codebase.
 
 ---
 
