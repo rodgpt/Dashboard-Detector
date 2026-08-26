@@ -1,8 +1,8 @@
 # Style guide — dashboard
 
-Extracted from `src/index.html` as built, not designed in advance. This documents what is already there so changes stay consistent, and flags where the current usage is inconsistent.
+**Status (2026-08-25): the live styling is `frontend/src/styles.css`** — the dark Mar Futura theme as CSS custom properties, extracted from the drift warning below during Phase 1R. This file remains the palette reference for Phase 2, which rebuilds the five views from `web/static/index.html`; the counts and hex tables below describe that superseded file, not the running app.
 
-**Last extracted:** 2026-08-02
+Originally extracted from `src/index.html` as built, 2026-08-02.
 
 > **Drift warning (2026-08-13).** The palette below describes the *light* CSS at the top of `index.html`, which is **dead styling**: a final `<style>` block — "TEMA OSCURO MAR FUTURA" — overrides it with `!important` and `--mf-*` custom properties. What the client actually sees is that dark theme: background `#0c2230` (gradient from `#0b2030`), panels `#12303f`, text `#e7f1f5`, muted `#9fbcc8`, brand `#64b1c5` with `#062028` text on brand buttons, borders `rgba(120,175,195,.16)`. The portada uses `assets/portada.jpg` under a dark gradient with a translucent glass card, and the logo is `assets/logo.png` (inverted to white on the portada). The login and admin pages replicate the dark layer via the tokens in `web/static/css/auth.css`. Re-extract this whole guide from the dark layer when the monolith splits in Phase 2; tracked in `TODO.md`.
 
@@ -10,9 +10,9 @@ Extracted from `src/index.html` as built, not designed in advance. This document
 
 ## Approach
 
-Plain CSS in a `<style>` block at the top of the single file. No framework, no preprocessor, no custom properties. Colours are written as hex literals inline, which is why the same blue appears twenty times.
+**Now:** plain CSS custom properties in `frontend/src/styles.css`, one `--mf-*` token per colour, React components consume tokens and never hex literals. No framework, no preprocessor — that rule survived the restructure.
 
-**First improvement worth making:** lift the palette below into `:root` custom properties. It is a mechanical change, it makes every subsequent visual change one edit instead of twenty, and it costs nothing at runtime. Do this before Phase 4 adds a device selector and multiplies the component count.
+**Then (the file below):** hex literals inline in one `<style>` block, the same blue twenty times. The "lift the palette into `:root`" improvement this section used to recommend is done.
 
 ---
 

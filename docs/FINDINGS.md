@@ -18,30 +18,30 @@ Paths are post-restructure. Last verified: 2 August 2026.
 
 | ID | Severity | Finding | Source | Phase |
 |---|---|---|---|---|
-| F-01 | CRITICAL | The `rms` and `auto` detection modes can never fire an alert | New | 1 |
-| F-02 | CRITICAL | Model load failure silently disables detection | Reports, confirmed | 1 |
-| F-03 | CRITICAL | Cooldown-suppressed detections erased. Clip leak FIXED, data loss REMAINS | New | 1 |
-| F-04 | CRITICAL | Live Twilio credentials in source, backup and bytecode | Reports, confirmed | 1 |
-| F-05 | HIGH | Deaf window is longest immediately after a detection | New (refines reports) | 1 |
+| F-01 | CRITICAL | The `rms` and `auto` detection modes can never fire an alert — **FIXED 2026-08-12** | New | 1 |
+| F-02 | CRITICAL | Model load failure silently disables detection — **FIXED 2026-08-12** | Reports, confirmed | 1 |
+| F-03 | CRITICAL | Cooldown-suppressed detections erased — **FIXED 2026-08-12** (clip leak fixed earlier) | New | 1 |
+| F-04 | CRITICAL | Live Twilio credentials in source, backup and bytecode — **code side FIXED 2026-08-12; rotation still pending** | Reports, confirmed | 1 |
+| F-05 | HIGH | Deaf window is longest immediately after a detection — **FIXED 2026-08-13** (continuous capture; bench soak pending) | New (refines reports) | 1 |
 | F-06 | HIGH | OTA update can strand the node with no rollback | Reports, confirmed | 1 |
-| F-07 | HIGH | Blob container is public and unauthenticated | Reports, confirmed | 1 |
-| F-08 | HIGH | GPS now env-configurable, literal still the default | Reports, confirmed | 1 |
-| F-09 | HIGH | Remote config cannot change detection sensitivity | New | 1 |
-| F-10 | HIGH | Remote config is unsigned and unclamped | Reports, confirmed | 1 |
-| F-11 | HIGH | Provisioning installs the abandoned prototype | Reports, confirmed | 1 |
+| F-07 | HIGH | Blob container is public; device holds the storage account key — **fix decided 2026-08-25 (D-017), not yet implemented** | Reports, confirmed | 1 |
+| F-08 | HIGH | GPS coordinates hardcoded and published — **FIXED; fully closed 2026-08-13** (coords only in `_sites.json`) | Reports, confirmed | 1 |
+| F-09 | HIGH | Remote config cannot change detection sensitivity — **FIXED 2026-08-13** (real params tunable, clamped, published) | New | 1 |
+| F-10 | HIGH | Remote config is unsigned and unclamped — **FIXED; signature mandatory 2026-08-22** (no key = no remote config at all) | Reports, confirmed | 1 |
+| F-11 | HIGH | Provisioning installs the abandoned prototype — **FIXED 2026-08-12** | Reports, confirmed | 1 |
 | F-12 | HIGH | Dashboard has no authentication | Reports, confirmed | 2 |
-| F-13 | MEDIUM | WhatsApp alert is sent before the clip exists | Reports, confirmed | 1 |
-| F-14 | MEDIUM | Manifest race. Cross-device case FIXED by site prefixes; retry race remains | Reports, confirmed | 1 |
-| F-15 | MEDIUM | Audio device now env-configurable, still no auto-detect, literal default | Reports, confirmed | 1 |
-| F-16 | MEDIUM | Telemetry CSV writes to a read-only partition | Reports, confirmed | 1 |
-| F-17 | MEDIUM | Provisioning and SD protection disagree on service user | New | 1 |
+| F-13 | MEDIUM | WhatsApp alert is sent before the clip exists — **FIXED 2026-08-12** | Reports, confirmed | 1 |
+| F-14 | MEDIUM | Manifest race — **FIXED 2026-08-13**: manifest retired, append-only event blobs (D-016) | Reports, confirmed | 1 |
+| F-15 | MEDIUM | Audio device index hardcoded — **FIXED 2026-08-13** (detected by name) | Reports, confirmed | 1 |
+| F-16 | MEDIUM | Telemetry CSV writes to a read-only partition — **FIXED 2026-08-13** (nothing writes to `/boot/firmware`) | Reports, confirmed | 1 |
+| F-17 | MEDIUM | Provisioning and SD protection disagree on service user — **FIXED 2026-08-12** | New | 1 |
 | F-18 | MEDIUM | Dashboard downloads everything, every poll | Reports, confirmed | 1 / 2 |
-| F-19 | LOW | Battery alert dedup state lost on reboot | Reports, confirmed | 1 |
+| F-19 | LOW | Battery alert dedup state lost on reboot — **improved 2026-08-13**; reboot persistence waits on D-002 | Reports, confirmed | 1 |
 | F-20 | LOW | Modem admin API queried without authentication | Reports, confirmed | Deferred |
-| **F-21** | **CRITICAL** | **Detector replaced. Arithmetically cannot fire on a sub-second event** | **New** | **0** |
-| F-22 | HIGH | Archive queue cap exceeds the RAM it lives in | New | 1 |
+| **F-21** | **CRITICAL** | **Detector replaced. Arithmetically cannot fire on a sub-second event** — direction confirmed 2026-08-12: keep PSD, second detector coming (D-014) | **New** | **0** |
+| F-22 | HIGH | Archive queue cap exceeds the RAM it lives in — **FIXED 2026-08-12** | New | 1 |
 | F-23 | MEDIUM | PSD algorithm duplicated: inlined in monolith and in detector_psd.py | New | 1 |
-| F-24 | MEDIUM | model.joblib is dead weight; loader is a stub | New | 1 |
+| F-24 | MEDIUM | model.joblib is dead weight; loader is a stub — **naming/stub FIXED 2026-08-12; model restored as detector in Phase 3** | New | 1 |
 | X-01 | — | Report claim that did not survive verification | Correction | Now |
 
 ---
@@ -72,7 +72,7 @@ The startup banner at line 1159 prints "Umbral RMS (fallback)" and the comment a
 
 `classify_clip` returns `{}` when the model is missing or throws. `proba` stays `0.0`, no alert ever fires, and heartbeats keep reporting the unit online. `_load_ml_model` caches its own failure through `_ml_load_attempted` at lines 287-289, so a model that fails to load once is never retried for the life of the process.
 
-`Rpi-Detector/docs/SYSTEM_REVIEW.md` §5.2 identified this and proposed falling back to RMS detection. Per F-01, that remedy does not exist and must be built rather than enabled.
+`docs/SYSTEM_REVIEW.md` §5.2 identified this and proposed falling back to RMS detection. Per F-01, that remedy does not exist and must be built rather than enabled.
 
 **Fix.** Model load failure raises a WhatsApp alarm and sets `detector_healthy: false` in `status.json`. Combine with F-01. Roughly 2 hours together.
 
@@ -107,6 +107,8 @@ Account SID and auth token are literal default values in `os.environ.get(...)` c
 
 **Fix.** Rotate the token in the Twilio console, move to `/etc/oceankind.env`, fail loudly at startup if absent, purge from the remote's history. Blocked on Twilio console access. Roughly 3 hours once unblocked.
 
+**Update 2026-08-18.** A remaining literal copy in `legacy/superseded-monolith/marfutura_iot_audio_v1.1.0_audited-20260802.py:49-50` was caught by GitHub push protection and redacted (defaults now `""`). `legacy/build-artifacts/` (backup + `.pyc`) is gitignored and never pushed. The token itself is still live and still compromised — **rotation remains pending**.
+
 ---
 
 ## HIGH
@@ -119,7 +121,7 @@ The main loop is strictly sequential. A quiet cycle is 5 seconds of `arecord` pl
 
 Blast fishing produces sequences, not isolated events. The system is at its blindest in the seconds after the first detection, and F-03 then discards whatever it does catch for the next 10 minutes.
 
-**Open contradiction between the delivered reports.** `Rpi-Detector/docs/IMPROVEMENT_REPORT.md` §3.1 says the system "may miss 30-60% of actual blasts". `Rpi-Detector/docs/SYSTEM_REVIEW.md` §3.1 says "the probability of missing a specific blast is low". Both went to the client. Resolve with a measurement, not with an edit.
+**Open contradiction between the delivered reports.** `IMPROVEMENT_REPORT.md` §3.1 says the system "may miss 30-60% of actual blasts". `SYSTEM_REVIEW.md` §3.1 says "the probability of missing a specific blast is low". Both went to the client. Resolve with a measurement, not with an edit.
 
 **Fix.** Instrument the loop and publish `duty_cycle_pct` and `deaf_seconds_total` before refactoring anything, so the async pipeline can be evaluated against a real baseline. Then the async pipeline. Roughly 2 hours to instrument, 18 to 28 to rebuild and validate.
 
@@ -131,15 +133,29 @@ Two-phase update: disable overlay, reboot, `git pull` plus `pip install`, re-ena
 
 **Fix.** A/B code directories with a symlink switch, post-restart health check, automatic reversion. Prove it by deliberately failing an update on the bench Pi Zero 2W. Roughly 6 to 10 hours.
 
-### F-07 — Blob container is public and unauthenticated
+### F-07 — Blob container is public; device holds the storage account key
 
-Azure storage account `marfuturatest`, container `alerts`
+Azure storage account `marfuturatest`, container `alerts`; `raspberry-pi/src/oceankind/storage.py:35-43`
 
-Set to public anonymous read deliberately, because the static dashboard has no backend and no other way to read. Exposes full detection history, all audio recordings, live telemetry, and exact GPS coordinates. Verified downloadable with no credential.
+Two halves, one root cause.
+
+*Read side.* Set to public anonymous read deliberately, because the static dashboard has no backend and no other way to read. Exposes full detection history, all audio recordings, live telemetry, and exact GPS coordinates. Verified downloadable with no credential.
+
+*Write side.* The device authenticates with `BlobClient.from_connection_string`, i.e. the storage account key: full read, write, delete and list across every container and every site, sitting in `/etc/oceankind.env` on an unattended node nobody can reach. Blast radius is the obvious problem. The one that decides the fix is that **a shared account key on unreachable devices cannot be rotated** — rotating it silences the whole fleet with no way to redistribute the replacement, so there is no incident response short of losing the fleet.
 
 The absence of a backend is the root cause of most of the security findings here.
 
-**Fix.** Container to private, dashboard reads via scoped read-only SAS, device writes via scoped write SAS instead of the storage account key. Blocked on Azure access. Roughly 3 hours once unblocked. Permanent fix is the Phase 2 API.
+**Fix — decided 2026-08-25, see D-017. Not yet implemented.**
+
+Read side: `--allow-blob-public-access false` at account level, dashboard reads via a scoped read-only SAS until the Phase 2 API (D-003).
+
+Write side: one Entra service principal per device, RBAC scoped to the container, narrowed by an ABAC path condition on `sites/{site}/*`. Verified against Microsoft's docs that blob path conditions need no hierarchical namespace, so the v2 tree survives unchanged. Needs a custom role — no built-in role is write-only. Never delete, never list, never read another site. Three blobs stay readable by necessity (`remote_config.json`, `_sites.json`, the two aux stubs); a literal write-only credential would kill remote tuning silently, which would be a self-inflicted silent-deaf mode.
+
+Backstop regardless of credential model: blob versioning and soft delete on, so an overwrite by a compromised credential is recoverable.
+
+Estimate revised from 3 hours to roughly 8 to 12: the earlier figure assumed a SAS string swap. Per-device service principals add provisioning work, a custom role definition, `azure-identity` on the device, and a clock-skew failure path that must be loud — a Pi Zero has no RTC, and Entra token acquisition fails on a bad clock in a way indistinguishable from a network fault.
+
+Permanent fix is still the Phase 2 API.
 
 ### F-08 — Sensor GPS coordinates hardcoded and published
 
@@ -159,7 +175,7 @@ The two values that do decide, `ML_THRESHOLD` and `ALERT_MIN_RMS`, are environme
 
 **Why it matters.** An operator can tune sensitivity, see the new value reflected in `status.json`, and change nothing. Changing real sensitivity requires editing the environment file and restarting the service, which means an OTA update, which is F-06. The safe knob is inert and the real knob requires the dangerous operation.
 
-There is also no configuration editor in `dashboard/src/index.html`. Whatever writes `remote_config.json` lives outside this repository.
+There is also no configuration editor in `https://github.com/rodgpt/Dashboard-Detector/blob/main/src/index.html`. Whatever writes `remote_config.json` lives outside this repository.
 
 **Fix.** Expose the real parameters through remote config, with clamping. Combine with F-10. Roughly 2 hours.
 
@@ -185,7 +201,7 @@ The dependency manifest had the same problem: it listed the prototype's librarie
 
 ### F-12 — Dashboard has no authentication
 
-`dashboard/src/index.html`
+`https://github.com/rodgpt/Dashboard-Detector/blob/main/src/index.html`
 
 Static page, no login, no token. Anyone with the URL has full read access to detection history, telemetry and sensor location.
 
@@ -271,7 +287,7 @@ Full `manifest.json`, `status.json` and `power_history.json` every 30 seconds. N
 
 ### X-01 — A report claim that did not survive verification
 
-`Rpi-Detector/docs/SYSTEM_REVIEW.md` §4.3 states that the dashboard stores a write-capable SAS URL in browser `localStorage` under `oceankind_write_sas_url`, and that one leaked browser lets an attacker raise the detection threshold so the station never alerts again.
+`docs/SYSTEM_REVIEW.md` §4.3 states that the dashboard stores a write-capable SAS URL in browser `localStorage` under `oceankind_write_sas_url`, and that one leaked browser lets an attacker raise the detection threshold so the station never alerts again.
 
 `SAS_URL_KEY` is declared at `dashboard/src/index.html:789` and referenced nowhere else in the file. It is a dead constant. There is no write path in the dashboard.
 
@@ -281,7 +297,7 @@ This should be corrected before the client's side finds it. A client who checks 
 
 ## Not defects
 
-**Raspberry Pi 4 is over-specified.** True, and irrelevant at one unit. Revisit only for a multi-unit rollout. `Rpi-Detector/docs/IMPROVEMENT_REPORT.md` §2 covers the migration options.
+**Raspberry Pi 4 is over-specified.** True, and irrelevant at one unit. Revisit only for a multi-unit rollout. `docs/IMPROVEMENT_REPORT.md` §2 covers the migration options.
 
 **SD card fragility.** A known risk, already mitigated by the overlay filesystem. It becomes critical only in combination with F-06.
 
@@ -353,3 +369,67 @@ Cosmetic individually. Together they mean nobody reading this file can tell what
 **Unchanged.** F-01 is byte-identical, the `rms` and `auto` modes still cannot fire. F-02 still applies, and `audio_health()` catches a dead hydrophone rather than a dead detector. F-04, the same Twilio token, still literal, after five weeks of development. F-13 and F-16 untouched.
 
 **Worse in effect.** The data-loss half of F-03. `maybe_trigger_cluster_call()` now counts every detection including cooldown-suppressed ones, so the system knows enough about suppressed events to place a phone call and still does not write them to the manifest.
+
+---
+
+## Phase 1 fixes (2026-08-12)
+
+All in `raspberry-pi/src/marfutura_iot_audio.py` unless noted. Verified by `raspberry-pi/tools/phase1_smoke_test.py` (synthetic audio, no hardware, no Azure, no Twilio) plus a refuse-to-start check. Emitted-field changes are documented in `docs/DATA-CONTRACT.md` §"As-built".
+
+**F-01 — fixed.** `DETECTION_MODE` is now `psd` | `rms` | `auto` (`ml` accepted as a legacy alias) and every mode genuinely decides: `rms` alerts on `rms >= ALERT_THRESHOLD` with no score gate, `auto` falls back to RMS when the classifier fails. `decided_by` reports what actually decided (`psd_tonal` | `rms` | `rms_fallback`), never a hardcoded string. Invalid modes refuse to start.
+
+**F-02 — fixed.** Classifier failures are counted; three consecutive failures set `health.detector_ok: false`, populate `degraded_reason`, log at ERROR and send one WhatsApp degradation alert (deduped until recovery). The stub `_load_ml_model` is deleted. In `auto` mode a dead classifier also falls back to RMS detection.
+
+**F-03 — fixed (data-loss half; clip leak was fixed at re-baseline).** Detections inside the cooldown are recorded in the manifest with `suppressed: true` (no notification, no audio upload — per D-008). Clip cleanup now runs in a per-iteration `finally`, covering error paths, and a startup sweep clears orphans from a crashed run. Archive-queue discards are counted and published as `health.clips_dropped`.
+
+**F-04 — code side fixed; rotation still blocked.** No literal credential defaults remain in source. Secrets load from the environment (`/etc/oceankind.env` via systemd) and the service refuses to start when they are absent (R-8.1), with `OCEANKIND_ALLOW_NO_TWILIO=1` as a bench-only escape hatch that is declared in `health.degraded_reason`. The token itself is still live in `legacy/build-artifacts/` and on the git remote until the client rotates it — that half stays open.
+
+*2026-08-13, client decision:* the exposed token **stays in service** until console access is granted. It now lives in `raspberry-pi/oceankind.env` — gitignored, flagged for rotation in the file itself — which `setup.sh` installs to `/etc/oceankind.env`. This keeps the unit alerting through the refuse-to-start change without putting the secret back into anything tracked. Rotation remains the single most urgent pending action.
+
+**F-05 — instrumented (the fix itself is Phase 2).** `health.duty_cycle_pct` (rolling 1 h window) and `health.deaf_seconds_total` are measured and published. The 24-hour bench baseline is pending bench time; the async pipeline gets judged against it.
+
+**F-08 — fixed.** No coordinate literals in source; unset means `null` in `status.json`, and the dashboard's site table is the location source of truth.
+
+**F-09 — reporting half fixed.** `status.json` now publishes a `detection` block with the thresholds actually in force (`score_min`, `rms_min`, `rms_threshold`, PSD band). Making them remotely tunable and clamped remains Phase 4 (with F-10).
+
+**F-11 — fixed.** `setup.sh` installs `src/marfutura_iot_audio.py` as the entry point, installs the production dependency set from the new `raspberry-pi/requirements.txt`, and writes an env template matching the real variables. The prototype and mosquitto are gone from provisioning.
+
+**F-13 — fixed.** The clip uploads before the notification goes out; the manifest entry records `clip_uploaded` truthfully; a notified alert whose upload failed links to the dashboard, not to a dead blob.
+
+**F-17 — fixed.** Both scripts resolve the service user with the identical expression (`${SERVICE_USER:-${SUDO_USER:-marfutura}}`).
+
+**F-22 — fixed.** `ARCHIVE_MAX_FILES` default lowered 3000 → 300 (~290 MB in RAM), discards counted in `health.clips_dropped`. Moving the archive off the overlay entirely remains with D-002.
+
+**F-24 — fixed (naming and stub).** `ML_THRESHOLD` → `SCORE_MIN`, `ML_POSITIVE_LABEL` (default `FILTRO`) → `DETECTION_LABEL` (default `MOTOR`), `ML_MODEL_PATH` and the stub loader deleted; legacy env names still honoured with a deprecation warning. `model.joblib` stays in `models/` awaiting its Phase 3 return as the second registry detector (client confirmed 2026-08-12 that a second model is coming).
+
+---
+
+## v2 cutover fixes (2026-08-13, D-016)
+
+The client decided the deployed units are prototypes: their blob freezes on v1, and the device now emits the **v2 contract only**, to new storage. Proven by `raspberry-pi/tools/v2_conformance_test.py` → `tools/validate_contract.py` → CONFORMANT.
+
+**F-14 — fixed by construction.** `manifest.json` is retired. One immutable blob per event under `sites/{site}/events/YYYY/MM/DD/`; there is no read-modify-write left to race, for any number of devices. Failed event uploads spool locally (bounded, 500) and drain each heartbeat; spool overflow is counted in `health.events_dropped`.
+
+**F-08 — fully closed.** Coordinates left `status.json` entirely; they live only in `_sites.json`, sourced from `/etc/oceankind.env` at provisioning. The refuse-to-start check requires them when storage is configured.
+
+**Consequence for F-18.** The old dashboard still downloads the old blob wholesale — unchanged. For the v2 fleet, "site X, last 24 hours" is a date-prefix listing by construction, so the dashboard's v2 reader can be cheap from day one.
+
+---
+
+## Phase 2 fixes (2026-08-13) — continuous capture
+
+The monolith became the `oceankind/` package: capture / classify / transport threads plus a housekeeping main thread. Proven by `raspberry-pi/tools/pipeline_soak_test.py`: real threaded pipeline over a synthetic source with artificially slow storage — capture never pauses, no event lost, tree CONFORMANT. The superseded monolith is preserved in `legacy/superseded-monolith/`.
+
+**F-05 — fixed (code).** Capture is a sounddevice callback stream; classification and every network operation moved off the audio path. The deaf window after a detection is gone by construction: a 60-second upload delays *other uploads*, never listening. `health.duty_cycle_pct` is now frame-based (audio delivered vs wall clock). The 24 h ≥99 % bench measurement remains the acceptance gate.
+
+**F-09 — fully fixed.** The parameters that actually decide (`score_min`, `alert_min_rms`, `alert_threshold`, PSD band, cooldown) are settable through `sites/{site}/remote_config.json` without restart, clamped to safe ranges, version-gated, and the applied values are published in `detection.thresholds`. Payload spec in `docs/DATA-CONTRACT.md`.
+
+**F-10 — fixed; signature mandatory since 2026-08-22.** Converged with the backend on the contract's §Device configuration: HMAC-SHA256 over the whole document minus `signature`, `config_version` as the version key, no v1 flat names. A device with **no key configured refuses all remote config** (it keeps running on its env-file values) — the earlier apply-unsigned-with-warning behaviour was the F-10 hole reopening and is gone. Unknown config keys, bad `detection_mode` enums and inverted PSD bands reject the document whole, and every rejection is a health event: named in `health.degraded_reason`, ERROR-logged once per `config_version`. Verified by smoke test §8 against independently-signed documents. Remaining: provision the shared key on both ends (fails safe until then — backend won't publish, device won't apply).
+
+**F-15 — fixed.** Device selected by name substrings (`OCEANKIND_AUDIO_DEVICE_NAME`), never by ALSA index. Ported from the legacy prototype per D-006.
+
+**F-16 — fixed.** Nothing writes to `/boot/firmware`. The telemetry CSV lives in `STATE_DIR` (tmpfs), bounded by row-trimming. Under the overlay it does not survive reboot — the resulting gaps in `power_history.json` are the signal the dashboard uses to detect reboots, and the D-002 decision gives all of `STATE_DIR` a persistent home with one env var.
+
+**F-19 — improved.** Battery dedup state moved to `STATE_DIR`: survives service restarts (the original complaint's practical case). True reboot persistence is physically impossible under the whole-root overlay and lands with D-002.
+
+**R-5.5 — closed.** Every network call now carries an explicit timeout: Twilio via `TwilioHttpClient(timeout=15)` (verified against the installed SDK signature), Azure client connection/read timeouts, modem HTTP 3 s, VE.Direct serial 1 s.

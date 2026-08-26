@@ -13,7 +13,7 @@ Self-contained. Everything referenced here is in this repository.
 ## Before ANY task
 
 1. **`REQUIREMENTS.md`** — what this must do. Numbered, testable. The spec
-2. **`docs/DATA-CONTRACT.md`** — the exact shape of everything the device writes and the backend reads. **Read before touching any storage or render path.** Every numeric field can be `null`. Canonical copy lives in `Rpi-Detector`; `make contract` checks the match
+2. **`docs/DATA-CONTRACT.md`** — the exact shape of everything the device writes and the backend reads, and the late-arrival obligations any derived view must honour. **Read before touching any storage or render path.** Every numeric field can be `null`. Canonical copy lives in `Rpi-Detector`; `make contract` checks the match
 3. **`docs/API-CONTRACT.md`** — the backend-to-browser contract. Read before adding a route or a fetch
 4. **`docs/PROGRESS.md`** — what's built, what phase the work is in
 5. **`docs/TODO.md`** — known issues outside the roadmap
@@ -47,7 +47,8 @@ frontend    vite build -> nginx:alpine, :80. serves the app, proxies /api/
 backend/app/core/       config, database, models, security, rate_limit
 backend/app/routers/    auth, admin, data, devices
 backend/app/services/   storage (the portability seam), events (pagination),
-                        deviceconfig (clamping + HMAC signing)
+                        deviceconfig (clamping + HMAC signing),
+                        indexer (derived index + weekly reconcile — D-021, D-022)
 backend/alembic/        migrations. schema changes never happen by hand
 frontend/src/api/       client.ts — the only thing that talks to the backend
 frontend/src/pages/     one per route: Login, Admin, Detections, Acoustic, …
@@ -64,6 +65,14 @@ frontend/src/components/ shared UI
 **Portable by construction.** No cloud provider's identity service, no cloud-specific runtime, no configuration service. Azure today because that is where the storage is. Moving to S3 is one new class in `services/storage.py` and an environment variable. Anything that breaks that is a decision, not an implementation detail.
 
 **All storage access goes through `Storage`.** Never import an Azure SDK outside `services/storage.py`. That file is the entire cost of changing provider, and it stays that way.
+
+**The index is derived, never authoritative.** Object storage is the record; `detection_events` is a queryable copy of it. Nothing writes to that table except the indexer, no request path treats a missing row as a missing detection, and it must stay rebuildable from the container. The moment it becomes the only place a detection exists, it stops being an index and becomes a liability (D-021, R-12.2).
+
+**The device push is an optimisation and must never become the mechanism.** The device POSTs each event to us for latency *and* writes the blob for durability (D-022). Correctness rests on the reconcile pass, not on the post succeeding — so never delete the blob write to save an upload, never treat a failed post as a lost event, and never let the reconcile be replaced by a high-water mark. A mark tracks capture date while what actually varies is arrival: once it passes a partition, anything landing there afterwards is unreachable, permanently and silently. Removing the event blob would also leave the reconcile comparing Postgres to itself, which always passes and means nothing.
+
+**Nothing bulk-reads audio, ever.** Clips are fetched one at a time when a human asks for one. An event JSON is ~600 bytes against ~960 KB of WAV, so any path that opens clips in a loop is off by three orders of magnitude. The indexer and the reconcile never open one.
+
+**A silent index is a deaf device.** An indexer that quietly skips events renders a dashboard that looks healthy while under-reporting. Drift is measured per day and per site and surfaced, never assumed (R-12.5).
 
 **The browser never holds a credential.** No storage key, no SAS token, no connection string reaches the client, ever. Audio is proxied through the API. The container stays private.
 

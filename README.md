@@ -70,9 +70,11 @@ a `LocalStorage` for development and an `AzureBlobStorage` for production. S3 is
 third subclass and one line in `get_storage()`; nothing else in the codebase knows
 which cloud it is on.
 
-**Postgres** holds only users, roles, site assignments, device credentials and
-tuned device configs. Detections stay in blob storage. Schema changes go through
-Alembic migrations — never by hand, never by `create_all`.
+**Postgres** holds users, roles, site assignments, device credentials, tuned device
+configs — and a **derived index of detection events** (D-021). Object storage
+remains the record for detections; the index is a queryable copy of it, rebuildable
+from the container, and losing it costs a rebuild rather than data. Schema changes
+go through Alembic migrations — never by hand, never by `create_all`.
 
 ---
 
@@ -119,8 +121,11 @@ Alembic migrations — never by hand, never by `create_all`.
 | `GET /api/sites/{id}/status` · `/power` · `/acoustic` · `/ocean` | rollups |
 | `GET /api/sites/{id}/clips/{path}` | audio, proxied |
 | `GET/POST/PUT/DELETE /api/admin/users` | user and site-assignment management |
+| `GET/POST/DELETE /api/admin/sites` | site registry. adding a unit is a data change |
 | `GET/POST/DELETE /api/admin/devices` | device registry. the key appears in the creation response, once |
+| `PUT /api/admin/devices/{id}/config` | tune thresholds. clamps, signs and publishes the blob |
 | `GET /api/devices/config` | read-only debug view of the signed config blob |
+| `POST /api/devices/events` | one detection, pushed by the device. idempotent on `event_id` |
 
 Every data route is authenticated and site-scoped. An operator assigned to one site
 receives 403 on another, on every endpoint, and the site does not appear in
@@ -130,9 +135,20 @@ receives 403 on another, on every endpoint, and the site does not appear in
 
 ## Things to know
 
-**Pagination is written, not free.** `backend/app/services/events.py` resolves a time
-range to date-partitioned blob prefixes and lists only those. Response includes
-`scanned_blobs` so the cost is visible rather than guessed.
+**Detections are answered from an index, not from storage.** `detection_events` in
+Postgres is a *derived* copy of the event blobs: one query per page, zero blob
+reads, at any window size (D-021). Object storage stays the record and the index
+is rebuildable from it — nothing writes to that table but the indexer.
+
+Two paths carry an event to us and that is deliberate (D-022). The device POSTs it
+to `/api/devices/events` for latency, and writes the blob for durability. The push
+may fail; a weekly reconcile pass then picks the event up from storage, so nothing
+is lost and only freshness suffers.
+
+**Audio is never bulk-read.** Clips are fetched one at a time, when a human asks
+for one. The event table, the index and the reconcile pass never open a `.wav` —
+an event JSON is ~600 bytes against ~960 KB of audio, so the difference between
+listing detections and downloading them is roughly three orders of magnitude (F-18).
 
 **Every numeric field can be `null`.** The device serialises non-finite floats that
 way, because Python emits `Infinity`, which is not valid JSON and once blanked the
@@ -147,6 +163,11 @@ for local http development only.
 **The backend serves no HTML.** nginx owns everything that is not `/api/`,
 including the SPA fallback. If a `StaticFiles` mount appears in the backend, the
 old single-container shape is creeping back — see D-019.
+
+**Device configuration travels through storage, not the API.** The backend writes
+a signed `sites/{site}/remote_config.json`; the device polls it. `GET
+/api/devices/config` is a read-only debug view that returns that blob byte for
+byte. This means the storage credential must be **write-capable** — see D-020.
 
 **One backend replica, deliberately.** The login throttle counts failures in
 process memory, so a second replica makes it bypassable. See

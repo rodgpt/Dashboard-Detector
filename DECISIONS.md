@@ -10,6 +10,8 @@ Domain-only choices that affect nothing outside their folder can live in that fo
 
 ---
 
+> **Decision numbering is per repository, not global.** `Rpi-Detector` and `Dashboard-Detector` each keep their own sequence, and the same number can mean different things in each. **Always qualify a citation from the other repository** (`Rpi-Detector D-017`), never a bare number. Known divergences are flagged in the entries themselves: D-016 and D-017.
+
 ## Index
 
 | ID | Status | Decision | Blocks |
@@ -34,6 +36,8 @@ Domain-only choices that affect nothing outside their folder can live in that fo
 | D-018 | PROPOSED | Fleet-scale credential lifecycle: rotation over the wire, enrollment | R-6.3 scope |
 | D-019 | DECIDED | Wrong protocol variant. Rebuild on `lynchLocalDev`: real backend/frontend divide | R-9, every phase |
 | D-020 | DECIDED | v2 only. Delete the v1 layer; device config becomes a backend-written blob | R-6.2, R-11, D-016 |
+| D-021 | DECIDED | A derived index in Postgres. The blob store stops being the query engine | R-5.2, R-12, Phase 1I |
+| D-022 | DECIDED | Device pushes events to the API. Event Grid dropped; blob stays the record | R-6.3, R-7.5, D-021 |
 
 ---
 
@@ -79,7 +83,7 @@ Read-write root with aggressive write minimisation. Simplest mentally, relies en
 
 **Options under consideration.** Azure Functions as a standalone HTTP API. Azure Static Web Apps with a managed API, which is interesting because the dashboard is already static-hosted on Azure and this bundles hosting, an API surface and a managed authentication layer in one product, potentially closing two findings at once. Azure Container Apps if the API outgrows serverless. Something non-Azure if there is a reason, though staying inside the existing subscription is worth real weight given the storage account, the IoT Hub and the static hosting already live there.
 
-**Explicitly not decided.** FastAPI plus Postgres is the default elsewhere and is not obviously right here. Do not assume it.
+**Superseded 2026-08-25: it IS decided.** D-019 built FastAPI + Postgres + React in three containers and 25 tests pass against it. The caution below was right to demand the platform be chosen deliberately; it was chosen by building and proving, and this line must no longer steer anyone away from the answer that shipped.
 
 **What to do before deciding.** Verify current capabilities and pricing from Microsoft's own documentation rather than from memory, per the research pipeline in `docs/research/RESEARCH.md`. Write it up as an analysis doc.
 
@@ -316,7 +320,9 @@ Theirs: what signal to look for, whether a detector works, threshold values on s
 
 ## D-016 — Device leads on v2, dashboard follows through a removable adapter
 
-**Status:** DECIDED, 2026-08-13
+**Status:** SUPERSEDED by D-020 (2026-08-22). Retained for the reasoning, not as instruction.
+
+**Numbering note.** `Rpi-Detector` carries a *different* D-016, "v2 cutover now, on fresh storage. Prototypes frozen", which is the stack-level decision and the one `DATA-CONTRACT.md` cites. Two registers drifted and collided on one number. The device's D-016 is authoritative for the stack; this one was always dashboard-local and is now withdrawn, so the collision resolves without renumbering anything. Cross-repo decisions live in the device register; anything numbered here is dashboard-local.
 
 **Context.** The device has no rollback and no physical access, so shipping it with the wrong output shape is the expensive mistake. The dashboard has neither constraint. Meanwhile the two production units still write v1 and the client owns deployment, so on the day we hand over they will still be speaking v1.
 
@@ -337,6 +343,8 @@ Theirs: what signal to look for, whether a detector works, threshold values on s
 ## D-017 — Device credential provisioning happens on the bench, through the issuance API
 
 **Status:** DECIDED, 2026-08-13
+
+**Not the same as `Rpi-Detector` D-017**, which covers the device's *storage* credential being write-scoped and revocable. This one is about the backend's per-device *API* key and how it reaches a unit. Complementary, both apply.
 
 **Context.** R-6.1 gives every device a per-device API key, held hashed server-side, presented as `X-Device-Id`/`X-Device-Key`. The keys have to get onto the units somehow. Every unit passes through someone's hands at flash time, so provisioning rides that step.
 
@@ -444,4 +452,88 @@ Where we were already right, and the device must move instead: the version key i
 
 **Also left open.** The per-device credential (R-6.1, D-017) currently has exactly one consumer, and this decision removes it. It is kept: it is the foundation for R-6.3 event upload, and revoking a unit's access is worth having regardless. But it is now infrastructure ahead of its use, and that should be said out loud rather than discovered later.
 
-**Trickles into.** `REQUIREMENTS.md` (R-11 withdrawn, R-6.2 restated), `docs/API-CONTRACT.md`, `docs/PROGRESS.md` (new Phase 1V), `backend/app/services/storage.py`, `backend/app/services/deviceconfig.py`, `backend/app/routers/devices.py`, `.env.example`.
+**Landed 2026-08-22, both sides.** The backend converged this afternoon: v1 deleted (11 marked blocks, 2 files), `Storage.put` added, the signed document published to `sites/{site_id}/remote_config.json`, `config_version` an opaque string, no `expires_utc`, `window_hop_s` in the clamp table, key renamed. Verified by an independent HMAC recompute and by the debug endpoint returning the blob byte for byte.
+
+The device converged the same day, verified by `raspberry-pi/tools/phase1_smoke_test.py` §8: an independently-signed document is accepted; tampered, wrong-key, unknown-key, bad-enum and inverted-band documents are rejected whole; a device with no key rejects everything; a document addressed to another `device_id` is skipped rather than treated as an error. The convergence table in `DATA-CONTRACT.md` now reads CONVERGED on every row.
+
+Worth recording because it is the good version of the failure this decision was about: the mismatch was found by writing it down and comparing, not by a device silently ignoring its configuration in the field.
+
+**Trickles into.** `REQUIREMENTS.md` (R-11 withdrawn, R-6.2 restated, R-8.5 corrected), `docs/API-CONTRACT.md`, `docs/PROGRESS.md` (Phase 1V), `docs/SERVER-INFRASTRUCTURE.md` (the storage credential must now be write-capable), `backend/app/services/storage.py`, `backend/app/services/deviceconfig.py`, `backend/app/routers/{admin,devices}.py`, `.env.example`.
+
+---
+
+## D-021 — A derived index in Postgres. The blob store stops being the query engine
+
+**Status:** DECIDED, 2026-08-22. Dashboard-local. Reopens D-004 (`Rpi-Detector`).
+
+**Context.** `list_events` resolves a date prefix and then issues one GET per blob, sequentially, filters in Python and slices for pagination. Cost is proportional to events in the window, not to page size, so `limit=50` costs exactly what `limit=500` costs, because `total` requires reading everything. It is a sync function, so it holds a threadpool worker for the whole duration.
+
+**The measurement.** The device writes one event per alerting window, including cooldown-suppressed ones (D-008), so a ten-minute boat pass is roughly 120 blobs. At a 5% alert rate that is 864 events per device per day, so one default seven-day query reads about 6,000 blobs. Sequentially at 15 ms that is around 90 seconds, for 3.6 MB of JSON. The payload is trivial; the round trips are not. Against `LocalStorage` the same query is 6,000 local file reads and finishes instantly, which is exactly why fixtures gave no warning.
+
+**This is not a fleet-size problem.** It scales on detection rate, not device count. Three units and one busy week already puts a cross-site view into five figures of blob reads.
+
+**Decision.** Index detection events in the Postgres the backend already runs. Indexed columns for what views filter and sort on, plus the full event document as `jsonb` so a page costs one query and zero storage reads. An indexer populates it, reconciling a trailing window of prefixes, with blob-created notifications as a latency optimisation on top rather than the thing correctness depends on.
+
+**Why this reopens D-004 rather than contradicting it.** D-004 was never DECIDED, it was PROPOSED, and it wrote its own reopen condition: *"a requirement appears for OR conditions, sorting on arbitrary fields, cross-device aggregates, or joins."* Cross-site views are on the roadmap and cross-device aggregates are exactly that. D-004 also stated its own headroom, "a few hundred detections a year... a hundred times current volume", which tops out around tens of thousands. The projection is millions. The reasoning in D-004 was sound; the volume assumption was wrong by roughly three orders of magnitude, because it predated the decision to record suppressed events.
+
+**Also settled by this.** The blob index tags D-004 proposed, specified in `DATA-CONTRACT.md` and never implemented, are not needed. Tag queries return names, so you still pay the GETs, and tag indexing can lag ten minutes, which D-004 itself ruled out for a live view.
+
+**What does not change, deliberately.** The data contract gains one paragraph, about capture-keyed partitions and late arrival, and no schema field. The device changes in no way and does not know the index exists (R-12.6). The API envelope is identical, so the frontend cannot tell. `Storage` remains the portability seam.
+
+**What earns the blob store its place afterwards.** Two things it is good at. An inbox: the device writes without our backend existing, which matters for a solar node on cellular with no physical access and a 500-event spool. And an archive: the audio is terabyte-scale over a year and belongs nowhere else, and cheap tiering is a storage feature, not a database one. It also keeps the index disposable, which is what stops it becoming a second source of truth.
+
+**The risk, named.** Silent drift. A missed notification or a reconcile pass that never ran leaves the dashboard looking healthy while under-reporting, which is the same shape as a device reporting itself healthy while deaf. Hence R-12.5: drift is measured per day and per site and surfaced, not assumed. The sharp edge is late arrival specifically, because partitions are keyed on `captured_utc`, so a poller watching only today never sees a spooled event that drained on Friday into Tuesday's prefix.
+
+**Considered and rejected: MQTT or an IoT-specific protocol.** MQTT is optimised for tiny frequent messages from constrained hardware with pub/sub fan-out and low-latency control. A Pi 4 running scipy is not constrained, one event every few seconds is not frequent, there is one producer and one consumer, and the payload that matters is a 960 KB WAV, which MQTT is bad at. Audio would go over HTTPS regardless, so it buys two transports where one suffices. It is also a transport, not an architecture: it would still need storage and still need this index. The evidence is already in the codebase, where Azure IoT Hub is wired into `notify.py` and `main.py`, carries heartbeats, and is consumed by nothing. Revisit at a few hundred devices, or when someone needs real-time control rather than a dashboard.
+
+**Trickles into.** `REQUIREMENTS.md` (R-5.2 restated as an outcome, R-12 added, "a database for detections" removed from Out of scope), `docs/PROGRESS.md` (Phase 1I), `docs/API-CONTRACT.md`, `CLAUDE.md`, `docs/DATA-CONTRACT.md` (late-arrival obligations, shared), and `Rpi-Detector` D-004 (reopened, no device work).
+
+**Amended 2026-08-26 by D-022** on two points: the blob-created notification path named above is replaced by a device push to our own API, and the volume basis below is withdrawn as unsound. The core of this decision — a derived index in Postgres, rebuildable, reconciled over a trailing window — stands unchanged and is if anything better supported.
+
+---
+
+## D-022 — The device pushes events to us. Event Grid is dropped; the blob stays the record
+
+**Status:** DECIDED, 2026-08-26. Dashboard-local for the index and the endpoint; the device side is a coordinated change and is not ours to schedule. Amends D-021.
+
+**Context.** D-021 settled that detections are indexed in Postgres and that the blob store stops being the query engine. It left the *fast path* as "blob-created notifications", meaning Azure Event Grid, with a reconcile pass underneath for correctness. Two things came out of reviewing that.
+
+**First, Event Grid contradicts the first hard rule in this repository.** R-1.1 and R-1.4 forbid a dependency on any cloud provider's runtime or configuration service, and `CLAUDE.md` opens with "portable by construction". Event Grid is exactly such a dependency, and it would have been the only one in the stack. A device posting to an endpoint we own works identically on Azure, on AWS, on a laptop, and on a client's own metal. The portable option is also the simpler one, and the decision that named Event Grid did not weigh portability at all.
+
+**Second, the volume figure that justified the urgency was unsound.** D-021 argued from "at a 5% alert rate", giving 864 events/device/day, ~6,000 blobs per default query and ~90 seconds. The 17,280 analysis windows per day is solid — it follows from back-to-back 5-second windows in the contract. **The 5% is not measured anywhere and has no source.** Two independent checks refute it:
+
+- Our own fixture generator (`tools/generate_fixtures.py`, `n = rng.randint(28, 46)` over 14 days) models **2–3 events per site per day**. Two documents in this repository differed by more than two orders of magnitude on the number that decides whether this work is urgent, and neither was grounded in an observation.
+- The operational threshold is roughly **ten detonations in a day** being the point at which someone calls the navy. That puts the real scale in the tens of events per day, not the high hundreds.
+
+So the index is *not* justified by page latency; at tens of events per day the current scan would have stayed tolerable for a long time. It is justified by **queryability and freshness**: a 90-day or cross-site question should cost one query rather than thousands of reads, and a detonation should appear in seconds rather than at the next poll of a scan. That is a better reason than the one originally given, and it survives the correction.
+
+**A bounding method, for when someone wants the real number.** Under v1 the cooldown erased suppressed detections (F-03), so each WhatsApp alert masked up to `cooldown_s / 5 s` events — 120 at the 600 s cooldown. If the client sees **N** alerts on a typical day, the v2 event rate is between N and 120N. That is answerable by asking them, without an Azure account.
+
+**Decision.**
+
+1. **The device POSTs each event to `POST /api/devices/events`**, authenticated with the per-device credential that R-6.1 already issues. This is the low-latency path.
+2. **The device also writes the event blob**, exactly as it does today. Unchanged.
+3. **Event Grid, and any blob-created notification mechanism, is dropped.** Not deferred — dropped.
+4. **A reconcile pass runs weekly** over a trailing window, diffing blob names against indexed `event_id`s and fetching only what is genuinely new.
+5. **Audio is never bulk-read.** Clips are fetched one at a time, when a human asks for one.
+
+**Why the device still writes the blob, when it is also pushing.** This was the live question and it is worth recording the answer rather than the conclusion.
+
+The event JSON is roughly 600 bytes. The WAV that accompanies the same detection is roughly 960 KB. **The blob write is about 0.06% of what the device already uploads for that detection** — rounding error on a cellular bill. For that price it buys four things that are individually expensive to replace:
+
+- **The device records without us.** An unattended solar node must not depend on our uptime to record a detonation. `ARCHITECTURE.md` already lists this under failure modes and it is load-bearing, not incidental.
+- **The index stays derived.** R-12.2 requires the index be rebuildable from storage and that nothing but the indexer writes to it. Remove the blob and Postgres becomes the sole record of a bomb detection, which would need a real backup and point-in-time-recovery story that a named volume does not provide.
+- **The reconcile pass has something to reconcile against.** This is the decisive one. A reconcile compares storage to the index. Without event blobs it would be comparing Postgres to itself, which always passes — the check would still run, still report green, and mean nothing.
+- **Drift stays measurable.** R-12.5 counts blobs against rows. No blobs, no metric.
+
+**Why push does not replace the reconcile.** Three independent uploads fail independently. The blob write can succeed while the push to us fails — we are deploying, a certificate rotated, we returned 503. The event is then in storage and not in the index, and nothing indicates it. The device tries hard (spool bounded at 500, retried each heartbeat, overflow counted in `health.events_dropped`) but it cannot guarantee delivery to us; it can only guarantee it tried. Push is therefore a latency optimisation, exactly as blob notifications were, and correctness continues to rest on the reconcile.
+
+This is also why **R-6.3 stays a `SHOULD` rather than becoming a `MUST`**: the system must be correct without it, and it is.
+
+**On the 500-event spool.** The cap was raised as a risk and it is not one, on the client's own framing. If ten detonations in a day warrants calling the navy, a device holding 500 queued events has been offline long enough that the spool cap is not what has failed. At the operational rate the spool is weeks of buffer, not hours. Device health is the client's responsibility and heartbeats make it visible within minutes (`heartbeat_interval_s` defaults to 60 s), which is the mechanism that actually protects against this.
+
+**What this exposes, and is not fixed here.** Health is reported every 60 seconds and rendered as a badge on a page nobody may have open. **Nothing alerts anyone when a device stops talking.** For a system whose purpose is to notice detonations, a unit that dies silently at 02:00 and is discovered at 09:00 is the failure this project exists to prevent. Recorded as R-7.5; it is a real gap and larger than the one this decision closes.
+
+**Considered and rejected: dropping the event blob and keeping only audio in storage.** Proposed on the reasoning that Postgres would answer every query anyway, which is true. Rejected because it is incompatible with the weekly reconcile in the same proposal — see the four points above. Postgres-as-record is a legitimate architecture; it simply costs a backup and recovery regime that this project has not budgeted, in exchange for saving 0.06% of the upload.
+
+**Trickles into.** `REQUIREMENTS.md` (R-6.3 rationale rewritten, R-7.5 added, R-12.4 reconcile cadence), `docs/PROGRESS.md` (Phase 1I), `docs/API-CONTRACT.md` (the device routes and `scanned_blobs`), `docs/ARCHITECTURE.md` (the diagram gains a device→backend path; storage stops being the only coupling), `docs/SERVER-INFRASTRUCTURE.md` (`pgdata` holds the index), `docs/TODO.md`, `CLAUDE.md`, `README.md`, and D-021 above (amended). **`docs/DATA-CONTRACT.md` is deliberately not yet touched** — it is canonical in `Rpi-Detector`, `make contract` pins the two copies, and a device→backend path that is not storage is a change to the coupling itself. It starts in the device repository or not at all.

@@ -282,11 +282,29 @@ def main():
     ap.add_argument("--days", type=int, default=14, help="history depth for events")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-clips", action="store_true", help="skip WAV generation (fast)")
+    ap.add_argument("--now", default=None,
+                    help="anchor timestamps to this ISO instant instead of the current time. "
+                         "Use it to reproduce an exact tree; omit it for day-to-day work.")
     args = ap.parse_args()
 
     rng = random.Random(args.seed)
     out = Path(args.out)
-    now = datetime(2026, 8, 8, 18, 0, 0, tzinfo=timezone.utc)   # fixed, so runs are reproducible
+    # Anchored to *now* by default.
+    #
+    # This used to be a fixed date "so runs are reproducible", and the cost was
+    # worse than the benefit: every default query window is relative to today,
+    # so a few weeks after that date `make dev` produced a dashboard with no
+    # detections in it. An empty dashboard that is empty because the fixtures
+    # rotted is indistinguishable from one that is empty because something
+    # broke — the exact confusion this project exists to remove, reproduced in
+    # the development loop.
+    #
+    # The seed still makes the *content* reproducible; only the timestamps move.
+    # Pass --now to pin them as well.
+    now = (datetime.fromisoformat(args.now) if args.now
+           else datetime.now(timezone.utc).replace(microsecond=0))
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
 
     write_json(out / "_sites.json",
                {"schema_version": SCHEMA_VERSION, "generated_utc": iso(now), "sites": SITES})

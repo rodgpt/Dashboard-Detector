@@ -10,7 +10,7 @@ make openapi          # writes docs/openapi.json
 
 This document is the part a generator cannot produce: why the surface is shaped this way, and what a client is obliged to do with it.
 
-Last updated 2026-08-21. Requirement IDs refer to `../REQUIREMENTS.md`.
+Last updated 2026-08-22. Requirement IDs refer to `../REQUIREMENTS.md`.
 
 ---
 
@@ -44,7 +44,8 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `DELETE` | `/api/admin/devices/{id}` | cookie, admin | Revoke a device credential |
 | `GET` | `/api/admin/devices/{id}/config` | cookie, admin | Effective (clamped) config, version, default or tuned |
 | `PUT` | `/api/admin/devices/{id}/config` | cookie, admin | Tune. Clamped on write; adjustments reported back |
-| `GET` | `/api/devices/config` | device headers | Signed configuration. See `DATA-CONTRACT.md` |
+| `GET` | `/api/devices/config` | device headers | **Debug view** of the published config blob, byte for byte. Not the delivery path |
+| `POST` | `/api/devices/events` | device headers | One detection, pushed. Low-latency path; idempotent on `event_id` (R-6.3, D-022) |
 | `GET` | `/api/health` | none | Liveness and which storage backend is wired |
 
 Everything not in that table requires a session. `/api/health` and `/api/auth/login` are the only two exceptions, and neither returns data (R-2.1).
@@ -142,13 +143,19 @@ Response:
 }
 ```
 
-`scanned_blobs` is deliberately in the response. It is the number that tells you whether a query is walking the right prefixes, and it is what F-18 would have made obvious before it became a bill.
+`scanned_blobs` is deliberately in the response. It was the number that told you whether a query was walking the right prefixes.
 
-**Ordering is newest first**, by `captured_utc`, which the date-partitioned path layout gives for free.
+**It changes meaning under D-021.** Once the index serves this endpoint, a page costs zero blob reads, so the field either reports honestly (zero, or the rows examined) or it is removed. What it must not do is keep returning a plausible number that no longer describes any work. A response with `"items"` served from an index that is three days stale, and no way for the caller to know, is the same class of lie as a device reporting itself healthy while deaf, so the replacement to reach for is an index-freshness field rather than a scan count.
+
+**Ordering is newest first**, by `captured_utc`. The date-partitioned path layout gave this for free while the endpoint read storage; under D-021 it becomes an `ORDER BY` on an indexed column, which is the same answer arrived at more cheaply.
 
 **`include_suppressed` defaults to `true`.** Suppressed detections are real detections whose notification was withheld; hiding them by default is how the record quietly stops matching reality (R-8.2, F-03).
 
-Filtering resolves to a prefix listing over the days in the range (R-5.2). A one-day query reads one day of blobs regardless of how many years the container holds.
+**Filtering is a query against the index, not a walk over storage** (D-021, R-12.1). A page of events costs one Postgres query and **zero** blob reads, at any window size — a 90-day question costs what a one-day question costs, and a cross-site question becomes expressible at all (R-12.7).
+
+*Superseded 2026-08-22 (D-021), corrected here 2026-08-26.* This section previously read "filtering resolves to a prefix listing over the days in the range… a one-day query reads one day of blobs regardless of how many years the container holds." That described the mechanism accurately and its cost misleadingly: listing a prefix is cheap, but the implementation then issued one GET per blob the listing returned, sequentially, and applied `limit`/`offset` in Python afterwards. So `limit=50` cost the same as `limit=500`, and `total` required reading everything. R-5.2 states the outcome for that reason.
+
+**No response is ever served from audio.** Clips are fetched one at a time through the clip route when a human asks for one; nothing in this endpoint, the index or the reconcile pass ever opens a WAV.
 
 ---
 
@@ -199,43 +206,37 @@ The four rollup routes (`/status`, `/power`, `/acoustic`, `/ocean`) and the `ite
 
 The consequence is a real gap and it is worth naming: a typo in `event.captured_utc` in frontend code will not fail the build. Closing it means generating TypeScript types from `DATA-CONTRACT.md` itself, which is tracked in `TODO.md`, not by bolting response models onto the pass-throughs.
 
-`web/src/api.ts` is the hand-written layer on top: `ApiError` with `isAuth` / `isForbidden`, and the `auth`, `data` and `admin` namespaces.
+`frontend/src/api/client.ts` is the hand-written layer on top: `ApiError` with `isAuth` / `isForbidden`, and the `auth`, `data` and `admin` namespaces.
 
 ---
 
 ## Devices
 
-`GET /api/devices/config` authenticates with `X-Device-Id` and `X-Device-Key`, not a session cookie. A compromised browser cannot reconfigure a device (R-6.1). Full payload, signature scheme, clamp ranges and expiry semantics are in `DATA-CONTRACT.md` under **Device configuration**, because the device is the consumer and the device repository mirrors that file.
+**Configuration reaches devices through storage, not through this API** (D-020).
 
-**Implemented (R-6.2, 2026-08-18).** The payload is composed from the tuned values in SQLite (defaults at `config_version` 1 until the first tune), clamped to the DATA-CONTRACT ranges, and signed with hex HMAC-SHA256 over the canonical serialisation (UTF-8, keys sorted, no whitespace, `signature` excluded), keyed by `OCEANKIND_CONFIG_HMAC_KEY`. `expires_utc` is `issued_utc` + 24 h and means *refresh me*, not *stop*. Without the signing key the route answers `503` — loud, and never an unsigned payload. The clamp table lives in code in `api/app/services/deviceconfig.py`; change it and `DATA-CONTRACT.md` together or not at all.
+The backend writes `sites/{site_id}/remote_config.json`, signed; the device polls it every 300 s and applies a document only when `config_version` differs from the one in force. The document shape, signature scheme, clamp ranges and unreachable-blob semantics live in `DATA-CONTRACT.md` under **Device configuration**, because the device is the consumer and that file is canonical in the device repository.
 
-**Tuning** (D-015: thresholds are the client's, bounds are ours) is `PUT /api/admin/devices/{id}/config`. Full replace; missing fields take defaults; unknown fields are a `400`, because a typo'd key that silently tuned nothing is a quiet failure. Out-of-range values are clamped to the nearest bound and reported back in `clamp_notes`, so the panel shows exactly what is now in force. An inverted PSD band (`psd_f_min >= psd_f_max`) and an invalid `detection_mode` are rejected, never repaired. Each accepted write bumps the monotonic `version`; the device applies only what is newer.
+`PUT /api/admin/devices/{id}/config` is where an administrator tunes it. That route clamps, signs and publishes in one operation: saving without publishing would leave the panel showing a configuration no device will ever apply. It returns `published_to` (the blob path) and, when the site holds more than one device, `publish_warning` — a site has exactly one configuration blob, so a second device's tune replaces the first's document, and that is said out loud rather than done silently.
 
-**Credential issuance** (R-6.1, D-017): `POST /api/admin/devices` generates the key server-side and returns it in the creation response, once. It is stored only as an argon2 hash; there is no route that reads it back, by construction. A lost key means revoke and reissue. The device's `site_id` must exist in `_sites.json` — sites are data, and a typo here would otherwise mint a credential for a site that never existed. Every successful device authentication stamps `last_seen`, which the admin panel shows as provisioning feedback: a freshly keyed unit that never connects is visible, not assumed working. `DELETE` is revocation — the unit gets `401` on its next poll and keeps its last valid configuration, per the expiry semantics in `DATA-CONTRACT.md`.
+With no `OCEANKIND_CONFIG_HMAC_KEY` configured the tune is refused with `503`. It is never persisted-but-unpublished and never published unsigned (R-6.2.1).
 
-A wrong device id and a wrong key return the same `401` with the same body; the response does not say which half was wrong.
+`GET /api/devices/config` authenticates with `X-Device-Id` and `X-Device-Key`, not a session cookie (R-6.1). It is a **read-only debugging view**: it returns the stored blob byte for byte and composes nothing of its own. Reading the document here and reading it from storage must never produce two different bytes, because that is precisely how a signature mismatch hides. If nothing has been published for the site it answers `404` — the honest answer, since the device keeps its last valid configuration and never falls back to defaults.
 
-`POST /api/devices/events` is specified nowhere yet. It is R-6.3, a `SHOULD`, and it stays unspecified until the device stops holding storage credentials of its own.
+**Historical note.** Until 2026-08-22 this route served a payload it composed itself, with an `expires_utc` and an integer `config_version`. The canonical contract specifies blob transport, a string `config_version` and no expiry; the two sides canonicalised different objects, so configuration would have silently stopped applying. See D-020.
 
----
+### `POST /api/devices/events` — the low-latency event path (R-6.3, D-022)
 
-## The `contract` block (temporary)
+Authenticated with `X-Device-Id` and `X-Device-Key`, like the config debug view. The device posts each event as it is detected, in the same shape it writes to the blob (`DATA-CONTRACT.md` is the schema; this route composes nothing of its own and puts no `response_model` over the document, for the same reason the rollup routes do not).
 
-While `OCEANKIND_CONTRACT_VERSION=1`, every response carries an extra `contract` object:
+Three properties are contractual and each exists to stop a specific failure:
 
-```jsonc
-{
-  "version": 1, "normalized_to": 2,
-  "unknown_fields": ["event_type", "detector"],
-  "time_is_upload": true,
-  "suppressed_undercounts": true,
-  "note": "..."
-}
-```
+- **Idempotent on `event_id`** (R-12.3). A re-post is a no-op, not a duplicate. Retries, an ambiguous timeout and an overlapping reconcile are then safe by construction rather than by care.
+- **Allowed to fail.** The device MUST continue writing the event blob regardless, and MUST NOT treat a failed post as a lost event. Correctness rests on the reconcile pass (R-12.4), never on this route succeeding.
+- **Never the sole record.** Nothing indexed here is absent from storage, which is what keeps the index derived (R-12.2) and keeps the drift metric (R-12.5) meaningful.
 
-It is absent under v2. A client must treat its presence as "label these fields as unknown", never as a reason to hide them or fill them in. It exists because the alternative, silently rendering a guess, is the same class of failure as a device reporting itself healthy while deaf.
+*Historical note.* Until 2026-08-26 this section read "specified nowhere yet… stays unspecified until the device stops holding storage credentials of its own." That precondition was wrong: the device keeps its storage credentials and keeps writing the blob. D-022 records why — the event JSON is ~0.06% of the WAV it accompanies, and the blob is what the reconcile compares the index against. Drop it and the reconcile compares Postgres to itself.
 
-Everything else in this document is identical under both versions. That is the point of the adapter: the API surface does not change, only what the backend had to do to produce it. See D-016, and `make drop-v1`.
+*Not in `DATA-CONTRACT.md`.* That file is canonical in `Rpi-Detector` and covers device→storage. A device→backend path is a change to the coupling itself and starts in the device repository.
 
 ---
 
@@ -243,4 +244,4 @@ Everything else in this document is identical under both versions. That is the p
 
 There is no `/v1` prefix and there will not be one while the browser and the backend ship in the same container from the same commit. If a third client ever appears, this is the first thing to revisit.
 
-Breaking changes to a route change `web/src/api.ts` in the same commit. CI compiles the frontend against the generated types, so a broken contract is a failed build rather than a runtime blank panel.
+Breaking changes to a route change `frontend/src/api/client.ts` in the same commit. CI compiles the frontend against the generated types, so a broken contract is a failed build rather than a runtime blank panel.

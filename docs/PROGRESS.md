@@ -43,12 +43,14 @@ Everything the presupuesto promises that a static page structurally cannot do. N
 - [x] Every data route site-scoped server-side, with a test asserting 403 across sites (R-3.4)
 - [x] First-administrator bootstrap for a fresh deployment (R-3.5)
 - [x] Secrets held server-side only; none reachable from the browser (R-4.1, R-4.2)
-- [x] Paginated, filtered detections resolved by date-partitioned prefix listing (R-5.1, R-5.2)
+- [x] Paginated, filtered detections (R-5.1). *Mechanism superseded by D-021: this was resolved by
+      date-partitioned prefix listing plus one GET per blob, which met R-5.1 and failed R-5.2 —
+      the slice happened after all the I/O. Phase 1I replaces the mechanism, not the endpoint*
 - [x] Rollups and clip proxying, so the container can be private (R-5.3, R-5.4, R-5.5)
 - [x] Malformed and unknown-version blobs surfaced, not swallowed, and never a 500 (R-5.6)
 - [x] Typed client, compiling clean. Now `frontend/src/api/client.ts`
 - [x] `docs/API-CONTRACT.md` plus generated `openapi.json` and `frontend/src/api/generated.ts` (R-9.5)
-- [x] v1 compatibility layer: reads the live v1 container, returns v2 shapes, removable with `make drop-v1` (R-11, D-016)
+- [x] ~~v1 compatibility layer~~ — built, served its purpose, then deleted whole in Phase 1V (D-020). R-11 withdrawn
 - [x] Login screen at `/login` and administration screen at `/admin` (R-3.3). Spanish, no
       framework, everything through the typed client. 401 redirects to login, 403 shows a
       permission message, never conflated. Sites come from the API, never a hardcoded list.
@@ -60,17 +62,16 @@ Everything the presupuesto promises that a static page structurally cannot do. N
       visible in the panel. Delete = revocation; the unit keeps its last valid config
       (2026-08-13)
 
-- [x] Signed, clamped device configuration (R-6.2). `GET /api/devices/config` serves the
-      DATA-CONTRACT payload: tuned values from the database, clamped server-side before signing,
-      hex HMAC-SHA256 over the canonical JSON, monotonic `config_version`, 24 h refresh
-      window. Tuning is `PUT /api/admin/devices/{id}/config` plus a "Configurar" editor in
-      the panel; out-of-range values are clamped and reported, inverted PSD bands and enum
-      typos rejected. Missing signing key = `503`, never an unsigned payload. This is the
-      replacement path for F-10; the finding closes when the device stops reading
-      `remote_config.json`, which is device-repo Phase 2 work (2026-08-18)
+- [x] Signed, clamped device configuration (R-6.2). Tuning is `PUT /api/admin/devices/{id}/config`
+      plus a "Configurar" editor in the panel; out-of-range values are clamped and reported,
+      inverted PSD bands and enum typos rejected, a missing key refuses rather than publishing
+      unsigned. *Built 2026-08-18 as an HTTP endpoint; moved to blob transport 2026-08-22 when
+      the canonical contract specified it (D-020, Phase 1V).* Closes F-10 on our side
+
+- [x] Conditional requests, `ETag` on rollups (R-5.7). Strong tag over the stored bytes;
+      an unchanged rollup costs a 304 and no body (2026-08-25)
 
 ### Open
-- [ ] Conditional requests, `ETag` on rollups (R-5.7)
 - [ ] Types generated from `DATA-CONTRACT.md` so device fields are checked too. See `TODO.md`
 
 **Done when:** a fresh deployment can be logged into, an operator sees only their sites on every endpoint, and no secret exists anywhere the browser can reach.
@@ -127,6 +128,76 @@ The contract's convergence table is the checklist. We are already correct on the
 - [x] `GET /api/devices/config` survives only as a read-only debugging view and must return byte-identical content to the blob
 - [x] Tests: published blob verifies against an independent HMAC recompute; refuses to publish with no key; a clamped tune is what lands in the blob
 
+## Phase 2 build list — extracted from the client's views, 2026-08-25
+
+**Why this exists.** The first four views were built from the *fixture shapes* — "here is what `status.json` contains, here is a reasonable way to show it" — instead of from the client's existing views. The result follows their palette and their tab names but is not their product: whole sections were missing and nobody had noticed, because nothing was comparing the two.
+
+`web/static/index.html` is the specification for what each view contains. This table is that file, read section by section. **Build against this list, not against the fixtures.**
+
+Legend: **ok** ported · **partial** exists but under-built · **missing** never built · **drop** deliberately not ported, with the reason
+
+### Detecciones (`tab-alertas`)
+
+| Section in the original | Source | State |
+|---|---|---|
+| Filtro de confianza (`#confidence-slider`) | `min_score` | **ok** — slider, and it announces what it is hiding |
+| `#include-legacy` toggle | v1 manifest | **drop** — a v1 artifact. No legacy tier exists under v2 (D-020) |
+| `#timeline-chart` | events | **ok** |
+| Alertas por hora del día (`#alertDielChart`) | events | **ok** |
+| Alertas registradas (tabla) | events | **ok** — plus suppressed/failed/never-kept clip states the original conflated (F-13) |
+
+### Monitoreo acústico (`tab-acustico`)
+
+| Section | Source | State |
+|---|---|---|
+| Línea de tiempo (`#acTimelineChart`) | `acoustic.timeline` | **ok** |
+| Ciclo diel NDSI (`#acDielNdsiChart`) | `acoustic.diel` | **ok** — split back out. A dual axis over 0..1 and tens of Hz manufactures a correlation |
+| Ciclo diel clicks (`#acDielClickChart`) | `acoustic.diel` | **ok** |
+
+### Condiciones del mar (`tab-oceano`)
+
+| Section | Source | State |
+|---|---|---|
+| Olas — swell y energía del mar (`#ocWaveChart`) | `swell_m`, `wave_m` | **ok** |
+| Viento — velocidad y ráfaga (`#ocWindChart`) | `wind_kmph`, `gust_kmph` | **ok** |
+| Nubosidad (`#ocCloudChart`) | `cloud_pct` | **ok** |
+| Definir "mar bueno para bucear" | `thresholds` + 13 inputs | **ok** — both modes (`energy` = swell²·período default 25, and `swellperiod`), wind cap, 8 directions. Persists in `localStorage` as the original did, and the panel says so |
+| — | `water_temp_c`, `weather_desc` | **ok** — surfaced in the stat grid |
+
+### Análisis (`tab-analisis`)
+
+| Section | Source | State |
+|---|---|---|
+| Línea de tiempo integrada (`#anTimelineChart`) | events | **ok** |
+| Alertas por estado de mar (`#anSeaChart`) | events + ocean | **ok** — bucketed by sea energy at capture hour; events with no sea data for their hour are counted aside, never dropped into a bucket |
+| NDSI vs click rate (`#anNdsiClickChart`) | acoustic | **ok** |
+| Click de camarón vs energía del mar (`#anEnergyChart`) | acoustic + ocean | **ok** |
+
+All four built. These are the only charts needing two sources at once, so each names the missing source instead of drawing empty: an empty correlation chart reads as "no relationship", which is a claim rather than an absence.
+
+### Estado del sensor (`tab-sensor`)
+
+| Section | Source | State |
+|---|---|---|
+| Historial de actividad del sensor | events + `session_start` | **ok** — four states ported (`active`/`session`/`empty`/`future`). "Not yet happened" is not "was silent" |
+| Conectividad y captura | `status.network`, `audio` | **ok** |
+| Energía solar — Victron BlueSolar MPPT | `status.power` | **ok** |
+| Sistema — estado interno de la Raspberry Pi | `status.system` | **ok** |
+| Energía — últimas 72 horas (`#powerHistoryChart`) | `power_history` | **ok** — plus gap preservation the original did not have (R-8.6) |
+| Espectrograma (`#spec-canvas`) | clip audio | **ok** — WebAudio decode plus an in-house radix-2 FFT, no new dependency. Has the text alternative the original lacked, and fails visibly rather than rendering a black rectangle that reads as silence |
+
+### Defect found while writing this list
+
+- [x] **`is_forecast` is in the contract and `Ocean.tsx` ignored it.** FIXED 2026-08-25. The view derived the observed/forecast boundary by comparing each timestamp to `now`, while the producer publishes the answer per point — and all 168 fixture points carry it, so the heuristic was running with the authoritative flag sitting right there. Now reads `is_forecast`, falls back to the clock only when the field is absent, and says so in the chart note when it does. `wave_m`, `gust_kmph`, `cloud_pct`, `water_temp_c` and `weather_desc` are surfaced in the same change; all five were in the contract and rendered nowhere.
+
+### Decided while building
+
+- [x] **Where "mar bueno para bucear" persists.** `localStorage`, as the original did — it is the viewer's preference, not system state. The panel says so out loud, because a dive window someone tuned and silently lost is exactly the small betrayal this project tries not to commit. If the client wants it per user and across devices, that is a table and two routes; still worth asking.
+
+  Original wording: **Where does "mar bueno para bucear" persist?** The original gives the operator thirteen inputs — mode, swell, period, energy, wind, eight direction checkboxes — and the contract publishes `thresholds` as producer-side defaults. So: does the operator's override live in the browser (`localStorage`, per device, lost on a new machine), or server-side per user (a real preference, needs a table and routes)? The original almost certainly did the former. It is worth asking whether that is what the client wants, because a dive window someone tuned and then lost is a small betrayal of exactly the kind this project is trying to avoid.
+
+---
+
 ### V-3. Consequential — ~1–2 h
 
 - [x] `?play=` retargeted at v2 clip paths (R-8.5 revised). A missing or never-kept clip must fail visibly
@@ -142,25 +213,97 @@ The contract's convergence table is the checklist. We are already correct on the
 
 ---
 
-## Phase 2: The five views, in React **NOT STARTED**
+## Phase 1I: The detection index **NOT STARTED**
+
+Dashboard-local, like 1R and 1V, so it does not consume a shared phase number. Needs no Azure account and no device change; the fixture tree exercises all of it. See D-021, **D-022** and R-12.
+
+**Why, corrected 2026-08-26 (D-022).** Not page latency. D-021 justified this with ~864 events/device/day, and that figure rested on an unsourced 5% alert rate which two independent checks refute — the fixture generator models 2–3/day, and the client's operational threshold (roughly ten detonations in a day warranting a call to the navy) puts the real scale in the tens. At that volume the existing scan would have stayed tolerable for a long time. The justification that survives is **queryability and freshness**: a 90-day or cross-site question costing one query rather than thousands of reads, and a detonation appearing in seconds rather than at the next poll of a scan.
+
+- [ ] `detection_events` table: indexed `site_id`, `captured_utc`, `event_type`, `detector`, `score`, `suppressed`, plus `event_id` unique and the full document as `jsonb` (R-12.1). Alembic migration
+- [ ] Index on `(site_id, captured_utc DESC)`. Monthly partitioning is not needed yet; note the trigger point rather than building it
+- [ ] Indexer: read a blob, upsert on `event_id`, `ON CONFLICT DO NOTHING` (R-12.3)
+- [ ] Reconcile pass over a trailing window of prefixes, configurable, defaulting to at least 14 days, running weekly (R-12.4). **This is the correctness mechanism, not the optimisation.** Cheap by construction: `{event_id}` is in the blob name, so it lists names, diffs against indexed ids, and fetches only what is new. Steady state is a few list calls and zero reads. It never opens a clip
+- [ ] `POST /api/devices/events` as the latency path (R-6.3, D-022). Optional, idempotent on `event_id`, and the system must be correct without it ever succeeding
+- [ ] ~~Blob-created notification path~~ — **dropped, not deferred (D-022).** It meant Azure Event Grid, the only cloud-specific runtime dependency the stack would have had, against R-1.1 and R-1.4. A device posting to an endpoint we own is both portable and simpler
+- [ ] `list_events` reads Postgres. Same envelope, same field names, so the frontend cannot tell (R-12.1)
+- [ ] Drift metric per day and per site: blobs in storage against rows indexed, surfaced in the admin panel and non-zero is a visible fault (R-12.5)
+- [ ] Rebuild command: drop and repopulate from the container, so the index is provably derived (R-12.2)
+- [ ] `scanned_blobs` in the API response either reports honestly or goes. It must not keep reporting a number that no longer describes the work done
+- [ ] Cross-site query, which the previous design could not express (R-12.7)
+
+**Tests that must exist, because these are the failure modes:**
+
+- [ ] An event blob written into a prefix a week in the past appears in the index without intervention
+- [ ] Indexing the same blob twice produces one row
+- [ ] The same event arriving by push and by reconcile produces one row (R-12.3, D-022)
+- [ ] An event that was pushed but whose push failed still reaches the index from storage
+- [ ] **The high-water-mark trap:** index up to day N, then write a blob into day N−3. It must still be found. A mark tracks capture date while what varies is arrival, so once a mark passes a partition anything landing there afterwards is unreachable — permanently and silently. This is the reason the trailing window exists and the test that proves it was not quietly replaced by a mark
+- [ ] A malformed blob is skipped, counted and surfaced, and does not stall the pass
+- [ ] Timezone-aware comparison at a day boundary, since this class of bug has already bitten once
+- [ ] A naive (offset-less) `since` does not 500 — see the two defects below
+- [ ] After a rebuild, a fixed query returns byte-identical results
+- [ ] No path in the indexer or the reconcile opens a `.wav`
+
+### Two defects in the code Phase 1I replaces — found 2026-08-26
+
+Both live in `services/events.py` and are wrong at any event volume.
+
+- [ ] **A naive `since` returns 500.** `since`/`until` arrive from the query string as `datetime`; an offset-less value stays naive while `until` defaults to aware UTC. The comparison at `events.py:60` then raises `TypeError`, and it sits *outside* the `try` above it, so it propagates as an unhandled 500. Violates R-5.6. Not reachable from our own UI — `client.ts` sends `toISOString()` — but reachable by any direct API caller. **One line; do not wait for Phase 1I**
+- [ ] **Offset timestamps select the wrong day partitions.** `_day_prefixes` uses `since.date()`/`until.date()`, which for a non-UTC offset yields the *local* date while partitions are keyed on UTC `captured_utc`. A window expressed in Chile time silently omits a prefix at each boundary — events that exist, are permitted, and do not appear. Carry into the index as a test
+
+**Done when:** a page of 50 events is served with zero reads against object storage, and the drift metric reads zero across every site and day in the fixture tree.
+
+---
+
+## Phase 2: The five views, in React **COMPLETE except deleting `web/`**
+
+**Foundation done 2026-08-25.** Phase 3's per-panel failure contract was built into the shell rather than bolted on afterwards, because the cheap moment to make a failed fetch look failed is while writing the fetch. `hooks/useResource.ts` holds the rules once: a failed refresh never erases the last good value, it marks it stale and says when it was good; a source that never loaded reports failed, not empty; each resource fails alone; 401 leaves for login; 403 and 404 are terminal and get no retry loop. It also carries a generation guard, so a slow response for a site you have navigated away from cannot overwrite the one you are looking at. `components/Panel.tsx` draws those four states the same way everywhere, so no view can invent a fifth.
 
 The client's five views are rebuilt as React pages reading the API. The 3,129-line monolith is deleted when the last view leaves it. No new features — this is the same product, correctly built.
 
-The largest single piece of remaining work, ~20–30 h. That is the honest cost of the wrong scaffold (D-019), and it is recorded rather than buried.
+**Built against the extracted build list above, not against the fixtures.** The first four views were written from the fixture shapes and silently omitted ten sections of the client's product; that was caught, inventoried, and closed. All 23 sections in that list are now ported.
 
-- [ ] `pages/Detections.tsx` — paginated events endpoint, not `manifest.json` (F-18)
-- [ ] `pages/Acoustic.tsx`, `pages/Ocean.tsx`, `pages/Analysis.tsx`, `pages/SensorStatus.tsx`
-- [ ] `components/PowerChart.tsx` on `react-chartjs-2`, replacing the CDN Chart.js tags
-- [ ] `components/SiteMap.tsx` on `react-leaflet`, replacing the CDN Leaflet tags
-- [ ] `components/AudioPlayer.tsx` — clips proxied through the API, and `?play=` deep links still resolve (R-8.5)
-- [ ] Spectrogram canvas ported, with a text alternative this time (A11y)
-- [ ] Sites from `GET /api/sites`; the hardcoded `SITES` table dies with the monolith
-- [ ] The v2 event schema surfaced: `captured_utc` not upload time, `event_type`, `detector`, `score`, `suppressed`, `clip.*` (R-8.2 to R-8.4)
-- [ ] Grouped `status.json` consumed: `health`, `detection`, `audio`, `power`, `network`, `system`
-- [ ] Unknown `schema_version` renders a visible warning, never a blank page
-- [ ] Every numeric field tolerates `null`; no `JSON.parse` without a guard
-- [ ] No storage URL anywhere in the frontend. The dead `SAS_URL_KEY` constant goes with the file (X-01)
-- [ ] `web/` deleted
+- [x] `pages/views/Detections.tsx` — paginated events endpoint, not `manifest.json` (F-18). Filters for period, type and suppressed; a filter that hides events announces itself (2026-08-25)
+- [x] `pages/views/SensorStatus.tsx` — health first and in words; `null` rendered as absence,
+      never zero; thresholds shown as the values *in force* on the device (F-09's honest half);
+      health fields the device sends but this version does not know are displayed raw rather
+      than dropped (2026-08-25)
+- [x] `pages/views/Acoustic.tsx` — NDSI and click rate with their interquartile band, plus the
+      diel cycle. A median alone understates how noisy a day was (2026-08-25)
+- [x] `pages/views/Ocean.tsx` — observed drawn solid, forecast drawn dashed, because past the
+      current hour it stops being a measurement. A 404 here says nothing about device health
+      and the message says so (2026-08-25)
+- [x] `pages/views/Analysis.tsx` — all four cross-source charts. Each names the source it is
+      missing instead of drawing empty, because an empty correlation chart reads as "no
+      relationship", which is a claim rather than an absence (2026-08-25)
+- [x] `components/PowerChart.tsx` on `react-chartjs-2` (R-8.6). **Gaps preserved**: a bucket
+      absent for more than 1.5 intervals inserts a null point so the line breaks instead of
+      spanning the silence, and the count of breaks is stated in words underneath. Buckets
+      present but null-valued are counted separately — device alive, sensor not reporting.
+      Verified against the fixture's deliberate 5 h outage: 135 buckets in, 136 points out,
+      one break (2026-08-25)
+- [x] `components/SiteMap.tsx` on `react-leaflet`. Coordinates rendered at 4 decimals and zoom
+      capped at 12 on purpose: it places the site, not the box. The threat model includes the
+      people the system detects (2026-08-25)
+- [x] `?play=` deep links resolve to `pages/views/ClipDetail.tsx`, on any tab (R-8.5). The three
+      outcomes are distinguished rather than conflated: no session, no permission, and a clip
+      whose upload failed after the alert was sent (F-13). Suppressed events say the audio was
+      deliberately never kept (D-008) (2026-08-25)
+- [x] Spectrogram ported — WebAudio decode plus an in-house radix-2 FFT, no new dependency.
+      Carries the text alternative the original lacked, and fails visibly instead of leaving a
+      black rectangle that reads as silence (2026-08-25)
+- [x] Sites from `GET /api/sites` via `components/SitePicker.tsx`; nothing hardcoded
+- [x] The v2 event schema surfaced: `captured_utc` as the event time, `event_type` distinguished by mark *and* word, `detector`, `score`, `suppressed` shown and flagged, `clip.*` split into uploaded / failed / never-kept (R-8.2 to R-8.4, F-13)
+- [x] Grouped `status.json` consumed: `health`, `detection`, `audio`, `power`, `network`, `system`
+      (`SensorStatus.tsx:54-60`; verified 2026-08-26)
+- [x] Unknown `schema_version` renders a visible warning, never a blank page (`SensorStatus.tsx:72`;
+      verified 2026-08-26)
+- [x] Every numeric field tolerates `null` and renders it as absence, never as zero
+- [x] No storage URL anywhere in the frontend. The only surviving `SAS_URL_KEY` is in
+      `web/static/index.html:1289` and goes with the folder (X-01; verified 2026-08-26)
+- [ ] `web/` deleted — **the only thing left in Phase 2.** Every view is ported; the folder is
+      now dead weight. Not deleted unilaterally: it is 3,129 lines of the client's original and
+      removing it is the one irreversible step here
 
 **Done when:** the whole interface runs against `make dev` with no storage credential in the browser, and `web/static/index.html` no longer exists.
 
@@ -170,7 +313,13 @@ The largest single piece of remaining work, ~20–30 h. That is the honest cost 
 
 The monitoring tool must be honest about its own state. This is the half of the contract that is about trust rather than features.
 
-- [ ] `health` surfaced at site-picker level: a degraded unit is obvious without opening a tab (R-7.4)
+- [ ] `health` surfaced at site-picker level: a degraded unit is obvious without opening a tab (R-7.4).
+      `HealthBadge` exists and is wired for the *selected* site in `Dashboard.tsx`; what is missing is
+      per-site health in `SitePicker`, which is the multi-site half of the requirement
+- [ ] **An alert when a device stops reporting (R-7.5, D-022).** Not a badge — an alert. Everything
+      above is visible only to someone who has the page open; a unit that dies at 02:00 is currently
+      discovered whenever somebody next looks. Threshold as a multiple of `heartbeat_interval_s`,
+      not a fixed hour, since the interval is remotely tunable from 30 s to 3600 s
 - [ ] Per-panel "last loaded" timestamp (R-7.2)
 - [ ] Every failed fetch visibly failed, with retry (R-7.1)
 - [ ] Each source fails independently; one 404 never takes the page down (R-7.3)
@@ -194,7 +343,7 @@ Ships simultaneously with the device's Phase 4. Not before, not after.
 - [ ] Detection list carries a site column and filter
 - [ ] v1 `?play=` deep links still resolve after the path change (R-8.5)
 - [ ] Bandwidth measured: an hour with the dashboard open transfers under 50 MB (F-18)
-- [ ] **`make drop-v1`** once the units write v2, then delete R-11 from `REQUIREMENTS.md`
+- [x] **`make drop-v1`** and R-11 withdrawn — done 2026-08-22 ahead of Phase 4, because the premise (unreachable v1 units) collapsed. See D-020 and Phase 1V
 
 ---
 
@@ -207,7 +356,7 @@ These were found by inspecting the image and the storage seam rather than by dep
 - [x] **The image ships no frontend.** Fixed by Phase 1R: the frontend is its own image. Was — `api/Dockerfile` copies `app/` only; the compiled interface reaches the running container purely through the `./web/dist:/web:ro` mount in `docker-compose.yml`. `main.py` guards the static routes with `if WEB_DIR.is_dir()`, which is false in the image, so a deployed container serves the API and returns 404 for `/`, `/login` and `/admin`. Needs a multi-stage build (node compile then copy) or a copy of a prebuilt `dist`
 - [x] **Site registry is manageable.** Sites live in Postgres and are created, deactivated and deleted in the admin panel; `_sites.json` stays a read fallback so a fixture tree still works with no setup, and `POST /api/admin/sites/import` seeds the table from it. Verified against a genuinely empty container: register a site, then a device, no blob involved. Deleting a site referenced by a device or a user assignment is refused (2026-08-21)
 - [x] **SQLite sits on an ephemeral filesystem.** Fixed by Phase 1R: Postgres with a named volume. Was — `sqlite:////data/oceankind.db` survives locally because `./data` is a bind mount. On Azure Container Apps (and most container hosts) the filesystem is ephemeral, so every restart or scale event destroys users, device credentials and tuned device configs. Decide: Azure Files volume, or Postgres by connection string (R-9.2 allows either)
-- [ ] **Single replica is a correctness requirement, not a cost choice.** `core/ratelimit.py` counts login failures in process memory and says so in its own docstring; two replicas means the R-2.4 throttle is bypassable by reconnecting. SQLite imposes the same limit. Pin to one replica and write down why
+- [ ] **Single replica is a correctness requirement, not a cost choice.** `core/rate_limit.py` counts login failures in process memory and says so in its own docstring; two replicas means the R-2.4 throttle is bypassable by reconnecting. Pin to one replica and write down why
 - [x] **`get_storage()` cached per process** with `lru_cache`, so the Azure client and its HTTP pipeline are built once, not per request (2026-08-21)
 - [x] **Timeouts on storage calls**: 10 s connect, 60 s read on the Azure client, so a hung blob read cannot hold a request open indefinitely (2026-08-21)
 

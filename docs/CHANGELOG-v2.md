@@ -1,5 +1,19 @@
 # Dashboard v2 — what changed
 
+> **Historical. Provenance, not specification.** (2026-08-22)
+>
+> This diffs `src/index.html`, which is now superseded reference material under
+> `web/` and is deleted in Phase 2. Its blob-shape claims were *inferred from how
+> the dashboard consumed them*, which the note below already says.
+>
+> The normative description of every blob is `DATA-CONTRACT.md`, which is
+> canonical in the device repository, verified end to end on the device side, and
+> enforced here by `make contract`. Where the two disagree, the contract wins.
+>
+> Kept because it records how the v2 field set was originally derived — by
+> walking the five tabs and working backwards — which is worth knowing if a field
+> ever looks arbitrary.
+
 Diff of `src/index.html` against the version audited on 2 August 2026, preserved at `https://github.com/rodgpt/Rpi-Detector/blob/main/legacy/superseded-monolith/dashboard/index.html`.
 
 1,779 lines to 3,126. 1,939 changed lines. Compared 8 August 2026.

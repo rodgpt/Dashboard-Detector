@@ -5,7 +5,7 @@ The browser never touches storage and never holds a credential (R-4.2, R-5.5).
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -14,7 +14,7 @@ from app.core.database import get_session
 from app.core.models import User
 from app.core.security import current_user, assert_site_allowed, allowed_sites
 from app.services.storage import get_storage
-from app.services.events import list_events, read_json
+from app.services.events import list_events, read_json, read_json_with_etag
 
 router = APIRouter()
 
@@ -67,33 +67,54 @@ def events(
                        min_score, include_suppressed, limit, offset)
 
 
-def _rollup(site_id: str, name: str, user: User, db: Session):
+def _rollup(site_id: str, name: str, user: User, db: Session,
+            request: Request, response: Response):
+    """A rollup blob, with conditional-request support (R-5.7).
+
+    These are polled continuously and change rarely, so an unchanged rollup
+    should cost a 304 and no body. That matters on a cellular-connected phone,
+    which is the field condition, not an edge case (F-18).
+    """
     assert_site_allowed(site_id, user, db)
-    doc = read_json(get_storage(), f"sites/{site_id}/{name}")
+    doc, etag = read_json_with_etag(get_storage(), f"sites/{site_id}/{name}")
     if doc is None:
         # absent or malformed: say so, do not fabricate and do not 500 (R-7.3)
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"{name} unavailable for this site")
+
+    if etag:
+        response.headers["ETag"] = etag
+        # Rollups are overwritten in place, so a client that already has these
+        # bytes needs nothing back.
+        response.headers["Cache-Control"] = "no-cache"
+        if request.headers.get("if-none-match") == etag:
+            response.status_code = status.HTTP_304_NOT_MODIFIED
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED,
+                            headers={"ETag": etag, "Cache-Control": "no-cache"})
     return doc
 
 
 @router.get("/sites/{site_id}/status")
-def status_(site_id: str, user: User = Depends(current_user), db: Session = Depends(get_session)):
-    return _rollup(site_id, "status.json", user, db)
+def status_(site_id: str, request: Request, response: Response,
+       user: User = Depends(current_user), db: Session = Depends(get_session)):
+    return _rollup(site_id, "status.json", user, db, request, response)
 
 
 @router.get("/sites/{site_id}/power")
-def power(site_id: str, user: User = Depends(current_user), db: Session = Depends(get_session)):
-    return _rollup(site_id, "power_history.json", user, db)
+def power(site_id: str, request: Request, response: Response,
+       user: User = Depends(current_user), db: Session = Depends(get_session)):
+    return _rollup(site_id, "power_history.json", user, db, request, response)
 
 
 @router.get("/sites/{site_id}/acoustic")
-def acoustic(site_id: str, user: User = Depends(current_user), db: Session = Depends(get_session)):
-    return _rollup(site_id, "acoustic_indicators.json", user, db)
+def acoustic(site_id: str, request: Request, response: Response,
+       user: User = Depends(current_user), db: Session = Depends(get_session)):
+    return _rollup(site_id, "acoustic_indicators.json", user, db, request, response)
 
 
 @router.get("/sites/{site_id}/ocean")
-def ocean(site_id: str, user: User = Depends(current_user), db: Session = Depends(get_session)):
-    return _rollup(site_id, "ocean_conditions.json", user, db)
+def ocean(site_id: str, request: Request, response: Response,
+       user: User = Depends(current_user), db: Session = Depends(get_session)):
+    return _rollup(site_id, "ocean_conditions.json", user, db, request, response)
 
 
 @router.get("/sites/{site_id}/clips/{path:path}")

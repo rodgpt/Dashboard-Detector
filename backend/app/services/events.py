@@ -1,10 +1,28 @@
 """Reading detections out of blob storage, filtered and paginated (R-5.1, R-5.2).
 
-This is what stops the browser downloading everything. The date-partitioned path
-layout means a time range is a prefix listing rather than a scan, so no index and
-no database are needed (D-004).
+SUPERSEDED BY D-021. This module is what Phase 1I replaces.
+
+The docstring here used to claim that date-partitioned paths made a time range a
+prefix listing "so no index and no database are needed (D-004)". The listing is
+indeed cheap; what follows it is not. `list_events` issues one GET per blob the
+listing returns, sequentially, filters in Python, and only then applies
+`limit`/`offset` — so a page costs what the whole window costs, and `total`
+requires reading everything. That satisfies R-5.1 while failing R-5.2, which is
+why R-5.2 was restated as an outcome rather than a mechanism.
+
+The filter predicate lives inside the blob body while the key encodes only the
+day, so no amount of slicing earlier fixes it: you cannot tell whether a blob
+matches without opening it. That is a data-model problem, and the answer is the
+derived Postgres index (D-021, R-12), fed by the device push (D-022, R-6.3) and
+kept correct by a reconcile pass over a trailing window (R-12.4).
+
+Two defects in here are wrong at any volume and are tracked in PROGRESS.md under
+Phase 1I: a naive (offset-less) `since` raises TypeError outside the guard below
+and surfaces as a 500, and `_day_prefixes` derives partitions with `.date()` on a
+possibly non-UTC offset, which drops a prefix at each boundary.
 """
 from __future__ import annotations
+import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -84,3 +102,23 @@ def read_json(storage: Storage, path: str) -> Optional[dict]:
         return json.loads(storage.get(path))
     except Exception:
         return None
+
+
+def read_json_with_etag(storage: Storage, path: str) -> tuple[Optional[dict], Optional[str]]:
+    """As `read_json`, plus a strong ETag over the exact bytes in storage (R-5.7).
+
+    Hashing the bytes rather than the parsed document is deliberate: it is what
+    actually changed, it costs nothing extra, and it cannot be fooled by two
+    different serialisations of the same values.
+    """
+    try:
+        raw = storage.get(path)
+    except Exception:
+        return None, None
+    try:
+        doc = json.loads(raw)
+    except Exception:
+        # Malformed is not missing. The caller still reports it as unavailable,
+        # but an ETag on unparseable bytes would be a lie about what we served.
+        return None, None
+    return doc, '"' + hashlib.sha256(raw).hexdigest()[:32] + '"' 

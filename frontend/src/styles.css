@@ -257,3 +257,204 @@ table.data td.actions .btn + .btn { margin-left: 8px; }
 .banner.error { background: var(--err-fill); border: 1px solid var(--err-border); color: var(--err-text); }
 .loading { color: var(--dim); font-size: .9rem; padding: 12px 0; }
 .centered { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+
+/* ── Monitor: barra de sitio y salud ───────────────── */
+.monitor-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.site-picker { display: flex; align-items: center; gap: 10px; }
+.site-picker-label { font-size: .85rem; font-weight: 600; color: var(--dim); }
+.site-picker select {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 14px; font-size: .92rem; font-family: inherit; color: var(--text);
+  outline: none; min-width: 190px;
+}
+.site-picker select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.monitor-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* Salud: color, forma y palabra. Nunca sólo color (R-8.8). */
+.health-badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  border-radius: 20px; padding: 5px 14px;
+  font-size: .85rem; font-weight: 600;
+  border: 1px solid;
+}
+.health-mark { font-size: .7rem; }
+.health-reason { font-weight: 400; opacity: .85; }
+.health-badge.ok       { background: var(--ok-fill);   border-color: var(--ok-border);   color: var(--ok-text); }
+.health-badge.degraded { background: var(--warn-fill); border-color: var(--warn);        color: var(--warn-text); }
+.health-badge.offline  { background: var(--err-fill);  border-color: var(--err-border);  color: var(--err-text); }
+.health-badge.unknown  { background: var(--brand-soft);border-color: var(--border-hi);   color: var(--dim); }
+
+/* ── Pestañas ──────────────────────────────────────── */
+.tab-nav {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 22px;
+}
+.tab-btn {
+  background: none; border: none; text-decoration: none;
+  padding: 10px 20px; font-size: .92rem; font-weight: 600;
+  color: var(--dim); cursor: pointer;
+  border-bottom: 3px solid transparent; margin-bottom: -1px;
+  border-radius: 6px 6px 0 0;
+}
+.tab-btn:hover { color: var(--brand); }
+.tab-btn.active {
+  color: var(--text); border-bottom-color: var(--brand); background: var(--brand-soft);
+}
+
+/* ── Panel: cabecera, frescura, estado ─────────────── */
+.panel-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.panel-head h2 {
+  font-size: 1.05rem; font-weight: 700; margin: 0;
+  border-left: 3px solid var(--brand); padding-left: 12px;
+}
+.panel-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: .82rem; }
+.panel-age { color: var(--dim); }
+.panel-age.stale { color: var(--warn-text); font-weight: 600; }
+.panel-refreshing { color: var(--dim); font-style: italic; }
+.panel-count { color: var(--dim); }
+.panel-scan { opacity: .7; }
+.panel-stale {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--warn-fill); border: 1px solid var(--warn); color: var(--text);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: .88rem;
+}
+
+/* ── Filtros ───────────────────────────────────────── */
+.filters {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 18px; margin-bottom: 20px;
+}
+.filters label { display: flex; align-items: center; gap: 8px; font-size: .85rem; }
+.filters label > span { color: var(--dim); font-weight: 600; }
+.filters select {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 12px; font-size: .88rem; font-family: inherit; color: var(--text); outline: none;
+}
+.filter-check input { accent-color: var(--brand); }
+.filter-warning {
+  color: var(--warn-text); font-size: .82rem; font-weight: 600;
+  background: var(--warn-fill); border: 1px solid var(--warn);
+  border-radius: 6px; padding: 4px 10px;
+}
+
+/* ── Eventos ───────────────────────────────────────── */
+.type-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 20px; padding: 2px 10px; font-size: .8rem; font-weight: 600;
+  border: 1px solid var(--border-hi); background: var(--brand-soft); color: var(--brand);
+}
+.type-badge.blast   { background: rgba(224,62,82,.16);  border-color: rgba(224,62,82,.45);  color: #f0a0aa; }
+.type-badge.vessel  { background: rgba(100,177,197,.16);border-color: var(--border-hi);     color: var(--brand); }
+.type-badge.unknown { background: none; border-style: dashed; color: var(--dim); }
+
+.row-suppressed { opacity: .78; }
+.chip.suppressed {
+  background: var(--warn-fill); border-color: var(--warn); color: var(--warn-text);
+  margin-left: 6px;
+}
+.chip.warn { background: var(--warn-fill); border-color: var(--warn); color: var(--warn-text); margin-left: 6px; }
+.null-value { color: var(--dim); opacity: .6; }
+.clip-none, .clip-failed { font-size: .82rem; color: var(--dim); }
+.clip-failed { color: var(--err-text); }
+.clip-player { height: 32px; max-width: 220px; }
+
+.pager {
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  margin-top: 16px; font-size: .85rem;
+}
+.pager-pos { color: var(--dim); }
+
+/* ── Estado del sensor ─────────────────────────────── */
+.sensor-headline {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.sensor-device { font-size: .85rem; color: var(--dim); }
+
+.section-head {
+  font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .6px;
+  color: var(--dim); margin: 22px 0 12px;
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+}
+.section-note { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .8; }
+
+.stat-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;
+}
+.stat {
+  background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px;
+}
+.stat-label { font-size: .78rem; color: var(--dim); margin-bottom: 6px; }
+.stat-value { font-size: 1.15rem; font-weight: 700; color: var(--text); }
+.stat-unit { font-size: .8rem; font-weight: 400; color: var(--dim); margin-left: 3px; }
+/* Fuera de rango: borde, fondo y color. Nunca sólo color. */
+.stat.bad { border-color: var(--warn); background: var(--warn-fill); }
+.stat.bad .stat-value { color: var(--warn-text); }
+/* Ausente: atenuado y en cursiva, para que no se lea como una medición. */
+.stat.missing { border-style: dashed; }
+.stat.missing .stat-value { font-size: .95rem; font-weight: 400; font-style: italic; }
+
+.degraded-reason {
+  margin-top: 14px; padding: 10px 14px;
+  background: var(--err-fill); border: 1px solid var(--err-border);
+  border-radius: 8px; color: var(--text); font-size: .88rem;
+}
+
+/* ── Gráficos ──────────────────────────────────────── */
+.chart-box { height: 320px; position: relative; }
+.chart-note { font-size: .82rem; color: var(--dim); margin-top: 12px; line-height: 1.5; }
+.gap-note { color: var(--warn-text); }
+.chart-box.short { height: 240px; }
+.chart-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; }
+.chart-row .panel { margin-bottom: 24px; }
+.filters input[type=range] { accent-color: var(--brand); width: 120px; }
+.slider-value { color: var(--text); font-variant-numeric: tabular-nums; min-width: 2.6em; }
+.save-note { margin-left: 12px; font-size: .82rem; color: var(--ok-text); }
+.dive-count { color: var(--ok-text); }
+
+/* ── Historial de actividad ────────────────────────── */
+.uptime-grid {
+  display: flex; gap: 2px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.uptime-cell {
+  width: 10px; height: 26px; border-radius: 2px; flex: 0 0 auto;
+  transition: opacity .12s, transform .12s;
+}
+.uptime-cell:hover { opacity: .75; transform: scaleY(1.08); }
+.uptime-cell.active  { background: #22c55e; }
+.uptime-cell.session { background: #86efac; }
+.uptime-cell.empty   { background: rgba(159,188,200,.22); }
+.uptime-cell.future  { background: rgba(159,188,200,.08); }
+.uptime-legend {
+  display: flex; gap: 16px; flex-wrap: wrap;
+  font-size: .8rem; color: var(--dim); margin-bottom: 10px;
+}
+.uptime-key { display: inline-flex; align-items: center; gap: 6px; }
+.uptime-key .uptime-cell { width: 8px; height: 14px; }
+
+/* ── Clip y espectrograma ──────────────────────────── */
+.clip-cell { display: flex; flex-direction: column; gap: 4px; }
+.clip-link { font-size: .78rem; }
+.clip-player.wide { max-width: 100%; width: 100%; height: 40px; margin-bottom: 8px; }
+.spectrogram {
+  width: 100%; height: 260px; display: block;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  image-rendering: pixelated;
+}
+.site-map { height: 300px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.leaflet-container { background: var(--bg2); }
+.leaflet-popup-content-wrapper, .leaflet-tooltip {
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+}
+.leaflet-tooltip::before { border-top-color: var(--border); }
+.leaflet-control-attribution { background: rgba(12,34,48,.8) !important; color: var(--dim) !important; }
+.leaflet-control-attribution a { color: var(--brand) !important; }

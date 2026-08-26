@@ -11,7 +11,7 @@ Adapted from the Lynch Protocol. The core principle is unchanged: **docs are the
 Read in this order. Do not skip to the code.
 
 1. **`README.md`** — What the system is, what actually runs, folder map
-2. **`docs/FINDINGS.md`** — Twenty verified defects. Four can silently stop detection. Read before writing a line
+2. **`docs/FINDINGS.md`** — 23 verified defects, most now fixed. Four can silently stop detection. Read before writing a line
 3. **`DECISIONS.md`** — What has been decided for the whole stack, and what is still open
 4. **`docs/ARCHITECTURE.md`** — How the Pi, blob storage, the dashboard and the future backend fit together
 5. **`docs/DATA-CONTRACT.md`** — The exact shape of everything crossing between the two codebases
@@ -36,7 +36,9 @@ So: anything about the system as a whole, the contract between the two, or a dec
 
 **A change on one side of the data contract is a change on both sides.**
 
-The Pi writes `manifest.json`, `status.json`, `power_history.json` and WAV clips. The dashboard reads them. Nothing validates this. No schema, no version field, no test. If the Pi starts writing a field differently, the dashboard breaks in a browser somewhere and nobody finds out.
+The Pi writes the v2 tree — per-event blobs, `status.json`, `power_history.json`, WAV clips — and the backend is the only reader of it. This IS validated now: every blob carries `schema_version`, `validate_contract.py` is the device's acceptance test, `make contract` pins both copies of the contract, and unknown versions surface as visible warnings instead of blank pages. The sentence that used to stand here described the v1 world and was the reason the contract exists.
+
+**As of Dashboard D-022 there is a second path, and it is not yet in the contract.** The device also POSTs each event to `POST /api/devices/events` for latency, while continuing to write the blob for durability. Storage remains the *durable* coupling; the API is a fast one that is allowed to fail. A device→backend path that is not storage changes what "the contract" covers, so it starts in `Rpi-Detector/docs/DATA-CONTRACT.md` — the canonical copy — or it does not start.
 
 Before changing anything that touches those files:
 
@@ -116,8 +118,8 @@ More units are confirmed for roughly six months out. Build the data layout for t
 |---|---|
 | Deaf window | Time when the hydrophone is not recording because the loop is busy |
 | Silent-deaf | Detects nothing, reports itself healthy. The worst failure mode |
-| The contract | The blob schemas in `docs/DATA-CONTRACT.md`. The only coupling between the codebases |
+| The contract | The blob schemas in `docs/DATA-CONTRACT.md`. The *durable* coupling between the codebases — and the only one it currently covers. Dashboard D-022 adds a second, `POST /api/devices/events`, which is not in the contract yet |
 | Bench unit | The Pi Zero 2W. Never the production node |
 | Production node | The single deployed unit at Lagunillas, Navidad |
 | Phase 1 | The contracted work: device reliability, security, multi-device foundation |
-| Phase 2 | The backend, authentication and admin panel. Specified, not contracted |
+| Phase 2 | The backend, authentication and admin panel. **Built and tested** — contracted in the approved presupuesto (D-019, D-020) |

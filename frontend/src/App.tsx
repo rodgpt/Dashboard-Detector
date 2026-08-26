@@ -33,8 +33,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/admin/*" element={<RequireAuth><Admin /></RequireAuth>} />
-          <Route path="/" element={<RequireAuth><Dashboard /></RequireAuth>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/*" element={<RequireAuth><Dashboard /></RequireAuth>} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

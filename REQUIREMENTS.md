@@ -4,6 +4,9 @@ A dashboard with authentication, backed by an API we own, that runs anywhere.
 
 `MUST` is contracted. `SHOULD` is expected unless there's a reason. Last updated 2026-08-22.
 
+
+> **Requirement numbering is per repository.** 41 R-IDs exist in both repos meaning different things (device R-1.1 is "never stop capturing"; ours is "one container"). **Always qualify a citation of the other repo's requirements** (`device R-3.6`), never a bare number. Same convention as the decision registers.
+
 ---
 
 ## Scope
@@ -80,7 +83,11 @@ We build the plumbing. The client provides the detection science.
 
 *Test:* a request for 50 events returns 50 records regardless of how many exist.
 
-**R-5.2 MUST** resolve time and site filters by reading only the relevant date-partitioned blob prefixes, not by scanning everything.
+**R-5.2 MUST** answer a page of detections at a cost that does not grow with the length of the history. Requesting 50 events from a site with a million must cost what it costs from a site with a thousand.
+
+*Test:* the work done to serve one page is measured and published, and stays flat as the container grows.
+
+This requirement used to name its mechanism, reading date-partitioned blob prefixes, and that mechanism turned out to satisfy the letter of it while failing the intent: prefix listing is cheap, but reading every blob the listing returns is not. Requirements state outcomes here. R-12 covers how this one is met.
 
 **R-5.3 MUST** serve sites, status, power history, acoustic indicators and ocean conditions.
 
@@ -104,7 +111,11 @@ We build the plumbing. The client provides the detection science.
 
 **R-6.2.1 MUST** hold the signing key in `OCEANKIND_CONFIG_HMAC_KEY`, and refuse to publish rather than publish unsigned when it is absent.
 
-**R-6.3 SHOULD** accept event uploads from devices, so the device stops needing storage credentials of its own.
+**R-6.3 SHOULD** accept event uploads from devices at `POST /api/devices/events`, authenticated with the per-device credential of R-6.1, so a detection reaches the index in seconds rather than at the next reconcile.
+
+*Revised 2026-08-26 (D-022).* This previously read "so the device stops needing storage credentials of its own". It does not stop needing them: it continues to write the event blob and the audio clip, and the blob remains the durable record the index is derived from (R-12.2). The purpose is **latency**, not credential removal.
+
+It stays a `SHOULD` deliberately. The push can fail independently of the blob write — we may be deploying, or returning 503 — so correctness rests on the reconcile pass (R-12.4) and the system must be complete without this endpoint ever succeeding. An optimisation that correctness depends on is not an optimisation.
 
 ---
 
@@ -117,6 +128,14 @@ We build the plumbing. The client provides the detection science.
 **R-7.3 MUST** survive any single data source being absent or malformed, without taking the rest down.
 
 **R-7.4 MUST** surface device health prominently. A unit reporting `detector_ok: false` or a falling duty cycle must look different at a glance, without opening a tab.
+
+**R-7.5 MUST** raise an alert when a device stops reporting, without waiting for a human to open the dashboard.
+
+*Added 2026-08-26 (D-022).* R-7.4 is satisfied by a badge on a page. That is sufficient for a unit someone is already looking at and useless for one that dies at 02:00. The device heartbeats every `heartbeat_interval_s` (default 60 s) and stamps `last_seen`, so silence is detectable within minutes — but nothing currently acts on it. Given that the operational purpose is noticing detonations, a silently dead unit is the same class of failure as a device reporting itself healthy while deaf, and gets the same treatment.
+
+*Test:* stop a device's heartbeat in the fixture tree; an alert is raised without anyone loading a page.
+
+Threshold and transport are open. The threshold should be a small multiple of the configured heartbeat interval rather than a fixed hour, since the interval is remotely tunable from 30 s to 3600 s. Transport is most likely the notification path that already exists for detections.
 
 ---
 
@@ -182,9 +201,43 @@ Reading the frozen prototype container, if it is ever wanted, is a one-off offli
 
 ---
 
+## R-12 Detection index
+
+The blob store is the record. It is not the query engine. R-12 is how R-5.1 and R-5.2 are actually met (D-021, reopening D-004 on its own terms).
+
+**R-12.1 MUST** maintain a queryable index of detection events in the application database, holding the fields any view filters or sorts on, and the full event document as written.
+
+*Test:* a page of 50 events, filtered and sorted, is served with zero reads against object storage.
+
+**R-12.2 MUST** treat the index as **derived**. Object storage stays the source of truth, the index is rebuildable from it, and nothing writes to the index except the indexer.
+
+*Test:* drop the index, rebuild from the container, and every query returns what it returned before.
+
+**R-12.3 MUST** be idempotent on `event_id`. Re-reading a blob already indexed is a no-op, so retries, duplicate notifications and overlapping reconcile passes are safe by construction rather than by care.
+
+**R-12.4 MUST** reconcile a trailing window of days, not only the current one, because event partitions are keyed on capture time and a spooled device drains late. The window MUST be at least as long as the longest device outage the system intends to survive.
+
+*Test:* write an event blob into a prefix a week in the past; it appears in the index without manual intervention.
+
+*Elaborated 2026-08-26 (D-022).* This is the correctness mechanism, and it runs whether or not R-6.3's push exists or succeeds. A weekly cadence over a trailing window is the baseline. The pass is cheap by construction because `{event_id}` appears in the blob name: list the prefixes in the window (names only, no blob opened), query the indexed `event_id`s for that range, take the set difference, and fetch **only** the blobs not already indexed. In steady state that is a handful of list calls and zero reads. It never opens a clip — everything it indexes is in the JSON.
+
+A high-water mark alone is not sufficient and MUST NOT be used as the only mechanism. A mark tracks capture date, but what varies is *arrival*; once the mark passes a partition, an event landing in that partition afterwards is unreachable, permanently and silently.
+
+**R-12.5 MUST** measure and surface drift: per day and per site, blobs present in storage against rows present in the index. A non-zero difference is a visible fault, not a log line.
+
+*Rationale:* an index that quietly misses detections renders a dashboard that looks perfectly healthy while under-reporting. That is the same failure as a device reporting itself healthy while deaf, and it gets the same treatment (R-7.1).
+
+**R-12.6 MUST NOT** require the device to change, to know the index exists, or to write anything it does not already write.
+
+**R-12.7 SHOULD** support cross-site queries, which the previous design could not express at all.
+
+---
+
 ## Out of scope
 
-Detection science. Deploying to the production devices. A database for detections. Any managed identity provider.
+Detection science. Deploying to the production devices. Any managed identity provider.
+
+**No longer out of scope:** a database for detections. It was excluded under D-004, which assumed a few hundred detections a year. The device records one event per alerting window including cooldown-suppressed ones, so a single boat pass is roughly 120 events, and the projection at fleet scale is millions a year. D-021 reopens it, on the reopen condition D-004 wrote for itself. The index is derived and holds no detection that is not also in storage, so this does not make the database a second source of truth (R-12.2).
 
 ---
 
