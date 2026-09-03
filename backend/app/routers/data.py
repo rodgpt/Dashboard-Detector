@@ -34,7 +34,12 @@ class EventsPage(BaseModel):
     limit: int
     offset: int
     has_more: bool
-    scanned_blobs: int
+    # Replaces `scanned_blobs`, which described work this endpoint no longer does
+    # (D-021). Null means nothing has ever been indexed for these sites — a
+    # fresh deployment, or an indexer that has not run. Worth showing: "no
+    # detections" and "no data reaching us" look identical and mean opposite
+    # things.
+    index_updated_utc: Optional[str] = None
 
 
 @router.get("/sites", response_model=SitesOut)
@@ -61,9 +66,13 @@ def events(
     user: User = Depends(current_user),
     db: Session = Depends(get_session),
 ):
-    """Paginated and filtered. The browser gets a page, never the history (R-5.1)."""
+    """Paginated and filtered. The browser gets a page, never the history (R-5.1).
+
+    Served from the derived index, so this costs one query and no reads against
+    object storage regardless of the window (D-021, R-12.1).
+    """
     assert_site_allowed(site_id, user, db)
-    return list_events(get_storage(), site_id, since, until, event_type,
+    return list_events(db, site_id, since, until, event_type,
                        min_score, include_suppressed, limit, offset)
 
 

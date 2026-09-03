@@ -320,6 +320,10 @@ table.data td.actions .btn + .btn { margin-left: 8px; }
 .panel-refreshing { color: var(--dim); font-style: italic; }
 .panel-count { color: var(--dim); }
 .panel-scan { opacity: .7; }
+/* Un índice vacío no se atenúa: es una ausencia que hay que notar, no un dato
+   secundario. Ámbar y sin opacidad reducida, igual que el resto de los estados
+   degradados. */
+.panel-scan.warn { opacity: 1; color: var(--warn-text); font-weight: 600; }
 .panel-stale {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   background: var(--warn-fill); border: 1px solid var(--warn); color: var(--text);
@@ -458,3 +462,12 @@ table.data td.actions .btn + .btn { margin-left: 8px; }
 .leaflet-tooltip::before { border-top-color: var(--border); }
 .leaflet-control-attribution { background: rgba(12,34,48,.8) !important; color: var(--dim) !important; }
 .leaflet-control-attribution a { color: var(--brand) !important; }
+
+/* ── Índice de detecciones (R-12.5) ─────────────────────────────────────────
+   Deriva distinta de cero es una falla, no una estadística, así que se lee
+   distinto de un cero. "Nunca verificado" va en ámbar y no en gris: no saber
+   si hay deriva no es lo mismo que no tenerla. */
+.idx-ok    { color: var(--ok-text); }
+.idx-bad   { color: var(--err-text); }
+.idx-never { color: var(--warn-text); }
+tr.row-warn > td { background: var(--warn-fill); }

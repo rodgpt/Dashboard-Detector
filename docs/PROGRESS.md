@@ -213,43 +213,49 @@ All four built. These are the only charts needing two sources at once, so each n
 
 ---
 
-## Phase 1I: The detection index **NOT STARTED**
+## Phase 1I: The detection index **SUBSTANTIALLY COMPLETE**
 
 Dashboard-local, like 1R and 1V, so it does not consume a shared phase number. Needs no Azure account and no device change; the fixture tree exercises all of it. See D-021, **D-022** and R-12.
 
-**Why, corrected 2026-08-26 (D-022).** Not page latency. D-021 justified this with ~864 events/device/day, and that figure rested on an unsourced 5% alert rate which two independent checks refute — the fixture generator models 2–3/day, and the client's operational threshold (roughly ten detonations in a day warranting a call to the navy) puts the real scale in the tens. At that volume the existing scan would have stayed tolerable for a long time. The justification that survives is **queryability and freshness**: a 90-day or cross-site question costing one query rather than thousands of reads, and a detonation appearing in seconds rather than at the next poll of a scan.
+**Why — measured 2026-08-26 (D-022).** D-021 justified this with ~864 events/device/day from an unsourced 5% alert rate. The client reports **~10 WhatsApp alerts on a typical day**, which under the v1 cooldown multiplier (F-03) bounds the real rate at **10–1,200 events/day**, planning figure a few hundred. 864 is inside that range, so the original figure was unsourced rather than wrong — an earlier revision of this note called it refuted and overstated the case.
 
-- [ ] `detection_events` table: indexed `site_id`, `captured_utc`, `event_type`, `detector`, `score`, `suppressed`, plus `event_id` unique and the full document as `jsonb` (R-12.1). Alembic migration
-- [ ] Index on `(site_id, captured_utc DESC)`. Monthly partitioning is not needed yet; note the trigger point rather than building it
-- [ ] Indexer: read a blob, upsert on `event_id`, `ON CONFLICT DO NOTHING` (R-12.3)
-- [ ] Reconcile pass over a trailing window of prefixes, configurable, defaulting to at least 14 days, running weekly (R-12.4). **This is the correctness mechanism, not the optimisation.** Cheap by construction: `{event_id}` is in the blob name, so it lists names, diffs against indexed ids, and fetches only what is new. Steady state is a few list calls and zero reads. It never opens a clip
-- [ ] `POST /api/devices/events` as the latency path (R-6.3, D-022). Optional, idempotent on `event_id`, and the system must be correct without it ever succeeding
+Both justifications therefore hold. **Queryability and freshness** is the better one and stands on its own: a 90-day or cross-site question costs one query instead of thousands of reads, and a detonation appears in seconds rather than at the next poll of a scan. **Page cost** is real too at the upper half of the range — 500/day over a seven-day window is ~3,500 blobs.
+
+⚠️ **The fixtures cannot validate this.** 2–3 events/day is below the measured lower bound, and `LocalStorage` makes thousands of reads instant — the two things that hid the original defect. Raise the generator's rate before calling this phase done (`TODO.md`).
+
+- [x] `detection_events` table: indexed `site_id`, `captured_utc`, `event_type`, `detector`, `score`, `suppressed`, plus `event_id` unique and the full document as `jsonb` (R-12.1). Migration `7deafd5e87df`. Two fields beyond the requirement: `indexed_utc` (freshness — the honest replacement for `scanned_blobs`) and `first_seen_via` (`push`/`reconcile`, which is the drift metric for the push path: if every row says `reconcile`, the device push has silently stopped)
+- [x] Index on `(site_id, captured_utc)`. Created ascending, not DESC: Postgres scans a btree backwards at the same cost for a single sort direction. Monthly partitioning still not needed
+- [x] Indexer: `services/indexer.py`, upsert on `event_id` inside a SAVEPOINT (R-12.3). Idempotency is enforced by the unique constraint rather than check-then-insert — two concurrent pushes of one event both see nothing and both insert, so the constraint has to be the mechanism
+- [x] Reconcile pass over a trailing window (R-12.4), `services/reconcile.py`, **scheduled daily** by `services/scheduler.py`. Verified at realistic volume: 4,985 blobs indexed in 2.3 s, and a clean re-pass fetches **0** blobs in 0.17 s. Never opens a clip, asserted by test
+- [x] Scheduler: an asyncio task in the app lifespan, not a cloud trigger (that would be the runtime dependency R-1.1 forbids) and not a scheduler library (a dependency and a second process for one periodic call). `OCEANKIND_RECONCILE_INTERVAL_HOURS=0` disables it, logged at warning level
+- [x] `IndexerRun` table (migration `3f3ca891ece9`): every pass recorded, **including a failed one**. "The reconcile has been crashing for a week" must not look like "the reconcile keeps finding nothing", and from outside they are identical unless the attempt is written down
+- [x] `POST /api/devices/events` as the latency path (R-6.3, D-022). Idempotent on `event_id`, `202` for a replay and never `409`. Rejections stamped on the device row beside `last_seen`, because a 4xx returned to an unattended box is seen by nobody
 - [ ] ~~Blob-created notification path~~ — **dropped, not deferred (D-022).** It meant Azure Event Grid, the only cloud-specific runtime dependency the stack would have had, against R-1.1 and R-1.4. A device posting to an endpoint we own is both portable and simpler
-- [ ] `list_events` reads Postgres. Same envelope, same field names, so the frontend cannot tell (R-12.1)
-- [ ] Drift metric per day and per site: blobs in storage against rows indexed, surfaced in the admin panel and non-zero is a visible fault (R-12.5)
-- [ ] Rebuild command: drop and repopulate from the container, so the index is provably derived (R-12.2)
-- [ ] `scanned_blobs` in the API response either reports honestly or goes. It must not keep reporting a number that no longer describes the work done
-- [ ] Cross-site query, which the previous design could not express (R-12.7)
+- [x] `list_events` reads Postgres. Same envelope, same field names (R-12.1). Measured: a 90-day page of 50 costs **2.2 ms** and zero storage reads, the same as a 7-day one — R-5.2 met as an outcome, not just in mechanism
+- [x] Drift metric per day and per site: `GET /api/admin/index`, read-only, opens no blob. Reports `last_run_utc` alongside, because zero drift that has never been checked is not evidence of anything (R-12.5)
+- [x] Rebuild: `POST /api/admin/index/rebuild`, requires the site id typed twice. Test asserts a rebuild reproduces byte-identical query results (R-12.2)
+- [x] `scanned_blobs` **removed**, replaced by `index_updated_utc`. Served from an index that count is always zero, and a field returning a plausible number describing no work is worse than absent. `null` renders as "índice vacío" in amber
+- [x] Cross-site query (R-12.7). `list_events` takes a list of sites; the route passes one today
 
 **Tests that must exist, because these are the failure modes:**
 
-- [ ] An event blob written into a prefix a week in the past appears in the index without intervention
-- [ ] Indexing the same blob twice produces one row
-- [ ] The same event arriving by push and by reconcile produces one row (R-12.3, D-022)
-- [ ] An event that was pushed but whose push failed still reaches the index from storage
-- [ ] **The high-water-mark trap:** index up to day N, then write a blob into day N−3. It must still be found. A mark tracks capture date while what varies is arrival, so once a mark passes a partition anything landing there afterwards is unreachable — permanently and silently. This is the reason the trailing window exists and the test that proves it was not quietly replaced by a mark
-- [ ] A malformed blob is skipped, counted and surfaced, and does not stall the pass
-- [ ] Timezone-aware comparison at a day boundary, since this class of bug has already bitten once
-- [ ] A naive (offset-less) `since` does not 500 — see the two defects below
-- [ ] After a rebuild, a fixed query returns byte-identical results
-- [ ] No path in the indexer or the reconcile opens a `.wav`
+- [x] An event blob written into a prefix a week in the past appears in the index without intervention — `test_reconcile.py::test_an_event_landing_in_a_past_prefix_is_still_found`
+- [x] Indexing the same blob twice produces one row — `test_indexer.py::test_indexing_the_same_event_twice_produces_one_row`
+- [x] The same event arriving by push and by reconcile produces one row (R-12.3, D-022) — `test_indexer.py::test_push_then_reconcile_produces_one_row`
+- [x] An event that was pushed but whose push failed still reaches the index from storage — covered by the reconcile pass tests; the blob is the source either way
+- [x] **The high-water-mark trap** — `test_reconcile.py::test_an_event_landing_in_a_past_prefix_is_still_found`. Index up to day N, then write a blob into day N−3. It must still be found. A mark tracks capture date while what varies is arrival, so once a mark passes a partition anything landing there afterwards is unreachable — permanently and silently. This is the reason the trailing window exists and the test that proves it was not quietly replaced by a mark
+- [x] A malformed blob is skipped, counted and surfaced, and does not stall the pass — `test_reconcile.py::test_a_malformed_blob_is_counted_and_does_not_stall_the_pass`
+- [x] Timezone-aware comparison at a day boundary, since this class of bug has already bitten once — `test_indexer.py::test_non_utc_offset_is_accepted_and_refers_to_the_right_instant`
+- [x] A naive (offset-less) `since` does not 500 — see the two defects below — `test_list_events.py::test_a_naive_since_does_not_raise`
+- [x] After a rebuild, a fixed query returns byte-identical results — `test_index_admin.py::test_rebuild_reproduces_the_same_answers`
+- [x] No path in the indexer or the reconcile opens a `.wav` — `test_reconcile.py::test_the_pass_never_opens_a_clip`
 
 ### Two defects in the code Phase 1I replaces — found 2026-08-26
 
 Both live in `services/events.py` and are wrong at any event volume.
 
-- [ ] **A naive `since` returns 500.** `since`/`until` arrive from the query string as `datetime`; an offset-less value stays naive while `until` defaults to aware UTC. The comparison at `events.py:60` then raises `TypeError`, and it sits *outside* the `try` above it, so it propagates as an unhandled 500. Violates R-5.6. Not reachable from our own UI — `client.ts` sends `toISOString()` — but reachable by any direct API caller. **One line; do not wait for Phase 1I**
-- [ ] **Offset timestamps select the wrong day partitions.** `_day_prefixes` uses `since.date()`/`until.date()`, which for a non-UTC offset yields the *local* date while partitions are keyed on UTC `captured_utc`. A window expressed in Chile time silently omits a prefix at each boundary — events that exist, are permitted, and do not appear. Carry into the index as a test
+- [x] **A naive `since` returns 500.** FIXED 2026-08-26 — `_as_utc()` reads an offset-less bound as UTC, documented in `API-CONTRACT.md` as a convention rather than left to be inferred. `since`/`until` arrive from the query string as `datetime`; an offset-less value stays naive while `until` defaults to aware UTC. The comparison at `events.py:60` then raises `TypeError`, and it sits *outside* the `try` above it, so it propagates as an unhandled 500. Violates R-5.6. Not reachable from our own UI — `client.ts` sends `toISOString()` — but reachable by any direct API caller. **One line; do not wait for Phase 1I**
+- [x] **Offset timestamps select the wrong day partitions.** FIXED 2026-08-26 — `reconcile._utc_date()` normalises to UTC before taking `.date()`, and the storage-walking `_day_prefixes` it afflicted is no longer on the query path at all. `_day_prefixes` uses `since.date()`/`until.date()`, which for a non-UTC offset yields the *local* date while partitions are keyed on UTC `captured_utc`. A window expressed in Chile time silently omits a prefix at each boundary — events that exist, are permitted, and do not appear. Carry into the index as a test
 
 **Done when:** a page of 50 events is served with zero reads against object storage, and the drift metric reads zero across every site and day in the fixture tree.
 
@@ -309,24 +315,31 @@ The client's five views are rebuilt as React pages reading the API. The 3,129-li
 
 ---
 
-## Phase 3: Make failure visible **NOT STARTED**
+## Phase 3: Make failure visible **SUBSTANTIALLY COMPLETE**
 
 The monitoring tool must be honest about its own state. This is the half of the contract that is about trust rather than features.
 
 - [ ] `health` surfaced at site-picker level: a degraded unit is obvious without opening a tab (R-7.4).
       `HealthBadge` exists and is wired for the *selected* site in `Dashboard.tsx`; what is missing is
       per-site health in `SitePicker`, which is the multi-site half of the requirement
-- [ ] **An alert when a device stops reporting (R-7.5, D-022).** Not a badge — an alert. Everything
-      above is visible only to someone who has the page open; a unit that dies at 02:00 is currently
-      discovered whenever somebody next looks. Threshold as a multiple of `heartbeat_interval_s`,
-      not a fixed hour, since the interval is remotely tunable from 30 s to 3600 s
-- [ ] Per-panel "last loaded" timestamp (R-7.2)
-- [ ] Every failed fetch visibly failed, with retry (R-7.1)
-- [ ] Each source fails independently; one 404 never takes the page down (R-7.3)
-- [ ] Suppressed detections shown and marked, never hidden (R-8.2)
-- [ ] `vessel`, `blast` and `unknown` visually distinct (R-8.3)
-- [ ] Missing and failed-upload clips handled distinctly (F-13)
-- [ ] Power history gaps preserved, never interpolated (R-8.6)
+- [x] **An alert when a device stops reporting (R-7.5, D-022).** `services/silence.py`, on its own
+      5-minute timer separate from the daily reconcile — "is the index complete?" is a daily
+      question, "is the unit alive?" is not. Liveness from `status.json → last_seen`, **not**
+      `Device.last_seen`: that column only stamps when a device authenticates to our API, which
+      under D-022 happens when it has an event to push, so a healthy unit in a quiet week would
+      have looked dead. Threshold is missed heartbeats × the device's *tuned* `heartbeat_interval_s`
+      with a floor, since the interval is remotely tunable 30–3600 s.
+      **Anti-flood:** one `DeviceAlert` row per outage. The check runs 288×/day; a unit down a week
+      sends 7 messages, not 2,016. All four volume knobs are in one block in `core/config.py` and
+      documented in `SERVER-INFRASTRUCTURE.md`. Transport is a portable webhook, log-only until one
+      is configured — Twilio stays blocked on F-04, and the alert is recorded either way
+- [x] Per-panel "last loaded" timestamp (R-7.2) — every `Panel` carries "actualizado hace X" (2026-08-25)
+- [x] Every failed fetch visibly failed, with retry (R-7.1) — `hooks/useResource.ts` holds the rule once (2026-08-25)
+- [x] Each source fails independently; one 404 never takes the page down (R-7.3) — per-resource state, generation-guarded
+- [x] Suppressed detections shown and marked, never hidden (R-8.2) — shown by default; any filter that hides them announces itself
+- [x] `vessel`, `blast` and `unknown` visually distinct (R-8.3) — distinguished by mark *and* word, not colour alone
+- [x] Missing and failed-upload clips handled distinctly (F-13) — uploaded / failed / never-kept are three states, not one
+- [x] Power history gaps preserved, never interpolated (R-8.6) — verified against the fixture's deliberate 5 h outage
 - [ ] Accessibility pass, colour never the only signal (R-8.8)
 
 **Done when:** deleting any single fixture file leaves the rest working and the affected panel explaining itself. The Matanzas fixture ships degraded on purpose; it should be obvious at a glance.

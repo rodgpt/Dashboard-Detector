@@ -43,8 +43,14 @@ rebuild:
 logs:
 	docker compose logs -f $(or $(s),backend)
 
+# RECONCILE_INTERVAL_HOURS=0 switches off the in-process reconcile timer. Tests
+# drive the pass explicitly; a background one would make them non-deterministic
+# and would reconcile against whatever fixture tree happened to be mounted.
 test:
-	docker compose run --rm -e OCEANKIND_DB_URL=sqlite:////tmp/test.db backend pytest -q
+	docker compose run --rm \
+	  -e OCEANKIND_DB_URL=sqlite:////tmp/test.db \
+	  -e OCEANKIND_RECONCILE_INTERVAL_HOURS=0 \
+	  backend pytest -q
 
 # Schema changes go through Alembic. Never by hand, never by create_all.
 migrate:

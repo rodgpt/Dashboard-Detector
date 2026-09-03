@@ -135,7 +135,11 @@ It stays a `SHOULD` deliberately. The push can fail independently of the blob wr
 
 *Test:* stop a device's heartbeat in the fixture tree; an alert is raised without anyone loading a page.
 
-Threshold and transport are open. The threshold should be a small multiple of the configured heartbeat interval rather than a fixed hour, since the interval is remotely tunable from 30 s to 3600 s. Transport is most likely the notification path that already exists for detections.
+*Built 2026-09-03.* `services/silence.py`. The threshold is a multiple of the device's tuned `heartbeat_interval_s` with a minimum-minutes floor, not a fixed hour — the interval is remotely tunable 30–3600 s, so a fixed duration means wildly different numbers of missed beats at either end.
+
+**Notification volume is bounded by construction**, because an alerting system that repeats every five minutes teaches people to ignore it: one `DeviceAlert` row per outage, notified once on opening, repeated only every `SILENCE_RENOTIFY_HOURS` (default 24, `0` to never repeat), and closed with a recovery message when the unit returns. All four knobs live in one block in `core/config.py`.
+
+Transport is a plain webhook — portable by construction (R-1.1), so it works with whatever the client already runs. Empty means log-only, which is the state today: Twilio remains blocked on client console access (F-04). The alert is recorded regardless, and a *failed* notification is recorded on the row, because an alert raised and never delivered is the failure this requirement exists to prevent.
 
 ---
 

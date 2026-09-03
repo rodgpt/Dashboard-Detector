@@ -12,12 +12,17 @@ playable WAV clips so the spectrogram works.
 Standard library only. Deterministic for a given seed.
 """
 
-import argparse, json, math, random, struct, uuid, wave
+import argparse, json, math, random, shutil, struct, uuid, wave
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = 2
 SR, CHANNELS, CLIP_S = 48000, 2, 5.0
+# Step between analysis windows, matching `window_hop_s` in the contract's clamp
+# table (default 5.0 = back-to-back, the calibrated behaviour). Episodes step at
+# this rate, which is what makes the generated event count reflect how long a
+# source actually sounds for rather than an arbitrary number.
+WINDOW_HOP_S = 5.0
 
 SITES = [
     {"id": "zapallar", "name": "Zapallar", "lat": -32.552665, "lon": -71.465068,
@@ -98,42 +103,88 @@ def write_json(path: Path, obj):
 
 # ── generators ────────────────────────────────────────────────────────────────
 
-def gen_events(out: Path, site, now, days, rng, clips=True):
-    """One blob per detection, date-partitioned. Returns the list written."""
+def gen_events(out: Path, site, now, days, rng, clips=True, episodes_per_day=10.0):
+    """Detections, generated as **episodes** rather than as isolated events.
+
+    The device analyses back-to-back 5-second windows and records one event per
+    alerting window *including* the ones a cooldown suppresses (D-008). So a
+    single sound source produces one notified event followed by a run of
+    suppressed ones for as long as it keeps sounding — a three-minute boat pass
+    is ~36 windows, one alert and ~35 suppressed.
+
+    This used to emit 28–46 isolated events per site per 14 days: 2–3 a day, all
+    independent, 22% suppressed. That was wrong in both volume and shape.
+    Measured 2026-08-26, the client sees ~10 WhatsApp alerts on a typical day,
+    which bounds the real event rate at 10–1,200/day (D-022). A tree at 2–3/day
+    cannot exercise an index, a reconcile pass or a drift metric at all — and
+    `LocalStorage` makes the difference invisible, which is exactly how the
+    original pagination defect survived months of `make dev`.
+
+    The episode model also fixes the clip volume problem for free, and honestly:
+    suppressed events never keep their audio, so ~10 clips a day rather than one
+    per event is not a shortcut, it is what the contract says happens.
+    """
     written = []
-    n = rng.randint(28, 46)
-    for _ in range(n):
-        captured = now - timedelta(seconds=rng.uniform(0, days * 86400))
+    n_episodes = max(1, int(round(episodes_per_day * days)))
+
+    for _ in range(n_episodes):
+        start = now - timedelta(seconds=rng.uniform(0, days * 86400))
         etype = rng.choices(["vessel", "blast", "unknown"], weights=[70, 22, 8])[0]
-        suppressed = rng.random() < 0.22
-        score = round(rng.uniform(0.62, 0.98), 4) if etype != "unknown" else round(rng.uniform(0.60, 0.72), 4)
-        eid = str(uuid.UUID(int=rng.getrandbits(128), version=4))
-        day = captured.strftime("%Y/%m/%d")
-        stamp = captured.strftime("%Y-%m-%dT%H-%M-%S")
-        clip_rel = f"sites/{site['id']}/clips/{day}/{eid}.wav"
-        uploaded = (rng.random() > 0.06) and clips   # a few genuinely failed uploads
 
-        ev = envelope(site["id"], site["device"], captured,
-            event_id=eid,
-            captured_utc=iso(captured),
-            uploaded_utc=iso(captured + timedelta(seconds=rng.uniform(2, 25))),
-            event_type=etype,
-            detector=DETECTORS.get(etype, "unknown"),
-            score=score,
-            suppressed=suppressed,
-            audio_level=round(rng.uniform(0.011, 0.240), 4),
-            peak_db=round(rng.uniform(-42.0, -8.0), 1),
-            bearing_deg=None,
-            clip={"path": clip_rel, "sample_rate": SR, "channels": CHANNELS,
-                  "duration_s": CLIP_S, "uploaded": uploaded},
-            detector_meta={"tonal_seconds": rng.randint(0, 5)} if etype == "vessel" else {},
-        )
-        write_json(out / f"sites/{site['id']}/events/{day}/{stamp}_{eid}.json", ev)
+        # How many consecutive windows the source sounds for. A vessel passes
+        # for minutes; a blast is impulsive and fires a handful at most (F-21
+        # is the open question of whether it fires at all).
+        if etype == "vessel":
+            windows = rng.randint(12, 90)          # ~1 to ~7.5 minutes
+        elif etype == "blast":
+            windows = rng.randint(1, 4)
+        else:
+            windows = rng.randint(1, 8)
 
-        if clips and uploaded:
-            gen = {"vessel": _vessel_audio, "blast": _blast_audio}.get(etype, _background_audio)
-            _write_wav(out / clip_rel, gen(rng))
-        written.append(ev)
+        for w in range(windows):
+            captured = start + timedelta(seconds=w * WINDOW_HOP_S)
+            if captured > now:
+                break
+            # The first window of an episode is the notified one; everything
+            # after it falls inside the cooldown and is recorded suppressed.
+            suppressed = w > 0
+            score = (round(rng.uniform(0.62, 0.98), 4) if etype != "unknown"
+                     else round(rng.uniform(0.60, 0.72), 4))
+            eid = str(uuid.UUID(int=rng.getrandbits(128), version=4))
+            day = captured.strftime("%Y/%m/%d")
+            stamp = captured.strftime("%Y-%m-%dT%H-%M-%S")
+            clip_rel = f"sites/{site['id']}/clips/{day}/{eid}.wav"
+
+            # Suppressed events carry their would-be path with uploaded:false —
+            # the audio is deliberately never kept (D-008). Of the rest, a few
+            # genuinely fail to upload (F-13).
+            uploaded = (not suppressed) and (rng.random() > 0.06) and clips
+
+            ev = envelope(site["id"], site["device"], captured,
+                event_id=eid,
+                captured_utc=iso(captured),
+                uploaded_utc=iso(captured + timedelta(seconds=rng.uniform(2, 25))),
+                event_type=etype,
+                detector=DETECTORS.get(etype, "unknown"),
+                score=score,
+                suppressed=suppressed,
+                audio_level=round(rng.uniform(0.011, 0.240), 4),
+                peak_db=round(rng.uniform(-42.0, -8.0), 1),
+                bearing_deg=None,
+                clip={"path": clip_rel, "sample_rate": SR, "channels": CHANNELS,
+                      "duration_s": CLIP_S, "uploaded": uploaded},
+                detector_meta={"tonal_seconds": rng.randint(0, 5)} if etype == "vessel" else {},
+            )
+            write_json(out / f"sites/{site['id']}/events/{day}/{stamp}_{eid}.json", ev)
+
+            if clips and uploaded:
+                gen = {"vessel": _vessel_audio, "blast": _blast_audio}.get(etype, _background_audio)
+                _write_wav(out / clip_rel, gen(rng))
+
+            # Inside the window loop: every event counts, not just the last of
+            # each episode. The summary line is what tells you whether the tree
+            # is realistic, so it has to count what was actually written.
+            written.append(ev)
     return sorted(written, key=lambda e: e["captured_utc"], reverse=True)
 
 
@@ -282,6 +333,11 @@ def main():
     ap.add_argument("--days", type=int, default=14, help="history depth for events")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-clips", action="store_true", help="skip WAV generation (fast)")
+    ap.add_argument("--episodes-per-day", type=float, default=10.0,
+                    help="detection episodes per site per day. Each is one notified event "
+                         "plus the suppressed windows behind it, so ~10 episodes is a few "
+                         "hundred events — the measured band (D-022). Lower it for a cheap "
+                         "tree when working on the interface rather than the index.")
     ap.add_argument("--now", default=None,
                     help="anchor timestamps to this ISO instant instead of the current time. "
                          "Use it to reproduce an exact tree; omit it for day-to-day work.")
@@ -306,17 +362,39 @@ def main():
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
 
+    # Clear the previous tree before writing a new one.
+    #
+    # Without this, re-running after the timestamps have moved *merges* two
+    # trees: the same seed replays the same `event_id` sequence against a
+    # different `now`, so the old and new runs collide — one id, two blobs, two
+    # different capture dates. That is not a shape any device can produce
+    # (`event_id` is a uuid4 written once), and it silently corrupts anything
+    # validated against these fixtures. It produced 45 duplicated ids across 128
+    # matanzas blobs and was found only by running the reconcile pass over them.
+    #
+    # Scoped deliberately: only the trees this script owns, never `out` itself,
+    # so pointing --out at a directory with anything else in it cannot delete it.
+    if out.exists():
+        for path in [out / "_sites.json", out / "sites"]:
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+
     write_json(out / "_sites.json",
                {"schema_version": SCHEMA_VERSION, "generated_utc": iso(now), "sites": SITES})
 
     for i, site in enumerate(SITES):
-        events = gen_events(out, site, now, args.days, rng, clips=not args.no_clips)
+        events = gen_events(out, site, now, args.days, rng, clips=not args.no_clips,
+                            episodes_per_day=args.episodes_per_day)
         gen_status(out, site, now, rng, healthy=(i == 0))   # matanzas ships degraded on purpose
         gen_power_history(out, site, now, rng)
         gen_acoustic(out, site, now, rng)
         gen_ocean(out, site, now, rng)
         sup = sum(1 for e in events if e["suppressed"])
-        print(f"  {site['id']:<10} {len(events):>3} events ({sup} suppressed)")
+        clips_n = sum(1 for e in events if e["clip"]["uploaded"])
+        print(f"  {site['id']:<10} {len(events):>5} events "
+              f"({sup} suppressed, {clips_n} clips, ~{len(events)/args.days:.0f}/day)")
 
     n_files = sum(1 for _ in out.rglob("*") if _.is_file())
     mb = sum(f.stat().st_size for f in out.rglob("*") if f.is_file()) / 1e6

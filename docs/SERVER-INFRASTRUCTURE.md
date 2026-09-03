@@ -68,7 +68,29 @@ Because nginx serves the app and proxies the API under one origin, the session c
 
 ## Deployment constraints
 
-**One backend replica.** Not a cost choice, a correctness one. `backend/app/core/rate_limit.py` counts login failures in process memory, so a second replica makes the R-2.4 login throttle bypassable by reconnecting. Moving the counter to Postgres or Redis is what lifts this restriction; until then, one replica.
+**One backend replica.** Not a cost choice, a correctness one, and there are now two reasons.
+
+`backend/app/core/rate_limit.py` counts login failures in process memory, so a second replica makes the R-2.4 login throttle bypassable by reconnecting.
+
+The reconcile timer (`services/scheduler.py`) also lives in the application process. Two replicas means two timers — *harmless*, because `index_event` is idempotent on `event_id` (R-12.3), but duplicated work. It adds no new constraint, since the throttle already pins this to one; it does mean lifting that pin later has to account for both. Moving the throttle counter to Postgres or Redis is not on its own enough.
+
+**The reconcile pass runs in-process, on a timer** (R-12.4, D-022). Deliberately not a platform scheduler: an Azure Container Apps job or an EventBridge rule would be the cloud runtime dependency R-1.1 forbids — the same objection that removed Event Grid. `OCEANKIND_RECONCILE_INTERVAL_HOURS=0` disables it for a deployment driving the pass from outside; it is logged at warning level, because an index with no reconcile is a supported configuration but never an accidental one.
+
+### Tuning the silence alert without drowning in notifications
+
+Two rates, and conflating them is what produces a flood:
+
+| | Setting | Default | Effect |
+|---|---|---|---|
+| how often we **look** | `SILENCE_CHECK_INTERVAL_MINUTES` | 5 min | none on volume — one small blob per site |
+| how long before the **first** warning | `SILENCE_AFTER_MISSED_HEARTBEATS` × the device's `heartbeat_interval_s`, floored by `SILENCE_MIN_MINUTES` | 20 beats / 15 min floor | 20 min at a 60 s heartbeat |
+| how often it **repeats** | `SILENCE_RENOTIFY_HOURS` | 24 h | **this is the anti-flood knob** |
+
+The threshold is in *missed heartbeats* rather than minutes because `heartbeat_interval_s` is remotely tunable from 30 s to 3600 s: a fixed "one hour" would be 120 missed beats on one setting and less than one on another. The floor stops a fast heartbeat making the system twitchy.
+
+One `DeviceAlert` row per outage is what holds the line. The check may run 288 times a day; a unit down for a week produces **7 messages, not 2,016**. Set `SILENCE_RENOTIFY_HOURS=0` for exactly one message per outage and no repeats.
+
+**If warnings are arriving too eagerly** — a flaky cellular link resolving itself — raise `SILENCE_AFTER_MISSED_HEARTBEATS`. Do not raise the check interval; that only delays noticing, it does not reduce messages.
 
 **Health probe** is `GET /api/health` on the backend and `GET /` on the frontend. Neither requires authentication and neither returns data.
 
@@ -81,6 +103,14 @@ Because nginx serves the app and proxies the API under one origin, the session c
 | `OCEANKIND_CONFIG_HMAC_KEY` | signs device configuration (R-6.2). Missing = tuning is refused with 503; never persisted-but-unpublished, never published unsigned. The same key goes to each device's `/etc/oceankind.env` |
 | `OCEANKIND_AZURE_CONNECTION_STRING` | storage, when `STORAGE_BACKEND=azure` |
 | `OCEANKIND_COOKIE_SECURE` | `true` in production. `false` only for local http |
+| `OCEANKIND_RECONCILE_INTERVAL_HOURS` | How often the index is checked against storage. Default 24. `0` disables the in-process timer |
+| `OCEANKIND_RECONCILE_WINDOW_DAYS` | How far back each pass looks. Default 14. **A commitment, not a knob**: events from a device offline longer than this are lost silently (R-12.4) |
+| `OCEANKIND_SILENCE_ALERTS_ENABLED` | Device-silence alerting on/off. Default true |
+| `OCEANKIND_SILENCE_CHECK_INTERVAL_MINUTES` | How often we **look**. Default 5. Does not affect how often anyone is told |
+| `OCEANKIND_SILENCE_AFTER_MISSED_HEARTBEATS` | Missed heartbeats before the **first** warning. Default 20 |
+| `OCEANKIND_SILENCE_MIN_MINUTES` | Floor under that threshold. Default 15 |
+| `OCEANKIND_SILENCE_RENOTIFY_HOURS` | **Anti-flood.** How often a still-down unit is mentioned again. Default 24. `0` = once per outage, never repeated |
+| `OCEANKIND_SILENCE_WEBHOOK_URL` | Where a notification goes. Empty = log only |
 
 **No cloud-specific runtime.** Azure Container Apps today because the storage is there. The stack is three ordinary containers and moves to any host that runs them (R-1.1).
 
@@ -95,7 +125,13 @@ make dev        # fixtures + db + backend + frontend
 | | |
 |---|---|
 | app | http://localhost:3000 |
-| backend direct (debugging only) | http://localhost:8000/api/health |
+| backend direct (debugging only) | `http://localhost:${BACKEND_PORT}/api/health` — **check `.env`, it is not always 8000** |
 | database | `docker compose exec db psql -U oceankind oceankind` |
+
+**The host port is a variable, and on at least one dev machine it has to be.** `BACKEND_PORT` only affects the host publish; inside the compose network the backend is always `backend:8000` and nginx proxies to that. If another project on the machine already holds the port, `docker compose up` fails with `Bind for 127.0.0.1:<port> failed` — a line that is easy to miss, after which the API appears to 404 because the *other* service is answering on that port. If a route you just added returns 404, check what is actually listening before you debug the route:
+
+```bash
+docker ps --format '{{.Names}}\t{{.Ports}}' | grep <port>
+```
 
 Talk to the app on 3000, not 8000. Hitting the backend directly bypasses nginx, which means a different origin and a session cookie that will not behave the way it does in production.

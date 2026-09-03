@@ -36,6 +36,27 @@ _JSON_DOC = JSONB().with_variant(sa.JSON(), "sqlite")
 _TZ_DATETIME = DateTime(timezone=True)
 
 
+def as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Coerce a timestamp read back from the database to offset-aware UTC.
+
+    **Use this on every datetime read off a row before comparing it to
+    anything.** Postgres returns `timestamptz` columns offset-aware; SQLite has
+    no timezone type and returns them naive, and the suite runs on SQLite while
+    production runs on Postgres. Subtracting a naive value from an aware one
+    raises `TypeError` rather than answering wrongly — so the failure appears
+    only on the engine you are not looking at.
+
+    This has now bitten three times: an unhandled 500 in the old storage-walking
+    query path, the reconcile pass's day bucketing, and the silence check's
+    renotify arithmetic. One helper, so there is no fourth.
+
+    The stored value is UTC either way; only the tzinfo tag is missing.
+    """
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
 class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(index=True, unique=True)
@@ -82,6 +103,22 @@ class Device(SQLModel, table=True):
     key_hash: str
     active: bool = True
     last_seen: Optional[datetime] = None
+
+    # --- event push health (D-022) -------------------------------------------
+    # The contract obliges us to surface a rejected push where `last_seen`
+    # already is, rather than in a log. A device whose every POST has been
+    # refused for a week — wrong site after a re-provision, a credential
+    # revoked, a malformed document after a firmware change — otherwise looks
+    # identical to a quiet one, and its events only appear at the next weekly
+    # reconcile with nobody aware anything was wrong.
+    #
+    # Comparing these two timestamps is the whole diagnostic: an error stamp
+    # newer than the success stamp means the push path is currently broken.
+    last_push_utc: Optional[datetime] = Field(
+        default=None, sa_column=Column(_TZ_DATETIME, nullable=True))
+    last_push_error_utc: Optional[datetime] = Field(
+        default=None, sa_column=Column(_TZ_DATETIME, nullable=True))
+    last_push_error: Optional[str] = None
 
 
 class DetectionEvent(SQLModel, table=True):
@@ -154,6 +191,96 @@ class DetectionEvent(SQLModel, table=True):
     # symptom is latency, which nobody notices. Without this the answer to "is
     # the push actually delivering?" requires reading logs that may not exist.
     first_seen_via: str = Field(default="reconcile", index=True)
+
+
+class DeviceAlert(SQLModel, table=True):
+    """An open fault against a site, and what we have told anyone about it (R-7.5).
+
+    Today there is one kind, `silent`: the unit has stopped reporting. R-7.4 is
+    satisfied by a badge on a page, which is enough for a unit somebody is
+    already looking at and useless for one that dies at 02:00 — and given the
+    system exists to notice detonations, a silently dead node is the failure it
+    is supposed to prevent.
+
+    **This row is the anti-flood mechanism.** The check runs every few minutes;
+    without somewhere to record that an alert is already open, every one of those
+    passes would notify again. One row per outage: opened once, notified once,
+    re-notified only on a slow cadence while it stays open, and closed when the
+    unit comes back.
+    """
+    __tablename__ = "device_alert"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    site_id: str = Field(index=True)
+    kind: str = Field(default="silent", index=True)
+
+    opened_utc: datetime = Field(
+        default_factory=_now, sa_column=Column(_TZ_DATETIME, nullable=False))
+    # The last heartbeat we saw before it went quiet — the "silent since" a human
+    # actually wants, rather than when our check happened to notice.
+    last_seen_utc: Optional[datetime] = Field(
+        default=None, sa_column=Column(_TZ_DATETIME, nullable=True))
+    # Null while open. Set when the unit reports again.
+    cleared_utc: Optional[datetime] = Field(
+        default=None, sa_column=Column(_TZ_DATETIME, nullable=True))
+
+    # When we last sent something about this alert, and how many times. Null
+    # notified_utc on an open alert means the notification itself failed — worth
+    # seeing, because an alert raised and never delivered is the silent failure
+    # this table exists to prevent.
+    notified_utc: Optional[datetime] = Field(
+        default=None, sa_column=Column(_TZ_DATETIME, nullable=True))
+    notify_count: int = 0
+    notify_error: Optional[str] = None
+
+    @property
+    def open(self) -> bool:
+        return self.cleared_utc is None
+
+
+class IndexerRun(SQLModel, table=True):
+    """One reconcile pass over one site. The audit trail for R-12.5.
+
+    Without this the reconcile is unfalsifiable: an index can look complete
+    because it is complete, or because the pass has not run since Tuesday and
+    nothing has arrived to contradict it. Those are indistinguishable from the
+    outside, and the second one is how a dashboard ends up quietly
+    under-reporting. So every pass records that it happened, what it found, and
+    whether it failed.
+
+    A row is written even when the pass raises, because "the reconcile has been
+    crashing for a week" is precisely the thing that must not be invisible.
+    """
+    __tablename__ = "indexer_run"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    site_id: str = Field(index=True)
+    started_utc: datetime = Field(
+        default_factory=_now,
+        sa_column=Column(_TZ_DATETIME, nullable=False, index=True, default=_now))
+    finished_utc: Optional[datetime] = Field(
+        default=None, sa_column=Column(_TZ_DATETIME, nullable=True))
+
+    # What the window covered, so a drift number can be read against the span it
+    # describes rather than an assumed one.
+    window_days: int = 0
+    blobs_in_storage: int = 0
+    newly_indexed: int = 0
+    conflicting: int = 0
+    rejected: int = 0
+    drift: int = 0
+
+    # Set when the pass raised. Non-null is a fault to surface, not a log line.
+    error: Optional[str] = None
+
+    # 'scheduled' or 'manual' — a drift number means something different when
+    # somebody just pressed the button than when the timer has been running
+    # unattended.
+    trigger: str = "scheduled"
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and self.drift == 0 and self.conflicting == 0
 
 
 class DeviceConfig(SQLModel, table=True):

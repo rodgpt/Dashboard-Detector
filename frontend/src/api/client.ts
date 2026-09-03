@@ -71,7 +71,15 @@ export interface DetectionEvent {
 
 export interface Page<T> {
   items: T[]; total: number; limit: number; offset: number;
-  has_more: boolean; scanned_blobs: number;
+  has_more: boolean;
+  /**
+   * Cuándo el índice recibió algo por última vez para este sitio (D-021).
+   * Reemplaza a `scanned_blobs`, que describía un trabajo que esta consulta ya
+   * no hace. `null` significa que nunca se indexó nada — despliegue nuevo, o el
+   * indexador no ha corrido. Se muestra, porque "sin detecciones" y "sin datos
+   * llegando" se ven igual y significan lo contrario.
+   */
+  index_updated_utc: string | null;
 }
 
 export interface Me { email: string; role: "operator" | "admin"; sites: string[]; }
@@ -157,6 +165,27 @@ export const data = {
     `/api/sites/${siteId}/clips/${clipPath.split("/clips/")[1] ?? ""}`,
 };
 
+/** Deriva del índice frente al almacenamiento, por sitio y por día (R-12.5). */
+export interface IndexDay {
+  day: string; blobs_in_storage: number; indexed: number; drift: number;
+}
+
+export interface IndexSite {
+  site_id: string; window_days: number; since: string; until: string;
+  blobs_in_storage: number; indexed: number; drift: number;
+  days_with_drift: IndexDay[];
+  /** `null` = la pasada nunca corrió. Deriva cero sin haber verificado nunca no es evidencia de nada. */
+  last_run_utc: string | null;
+  last_run_ok: boolean | null;
+  last_run_error: string | null;
+  last_run_trigger: string | null;
+}
+
+export interface ReconcileResult {
+  site_id: string; newly_indexed: number; conflicting: number;
+  rejected: number; drift: number; ok: boolean; error: string | null;
+}
+
 export const admin = {
   users: () => req<AdminUser[]>("/admin/users"),
   createUser: (b: { email: string; password: string; role: "operator" | "admin"; sites: string[] }) =>
@@ -173,6 +202,14 @@ export const admin = {
     req<Site>(`/admin/sites/${id}`, { method: "PUT", ...json(b) }),
   deleteSite: (id: string) => req<void>(`/admin/sites/${id}`, { method: "DELETE" }),
   importSites: () => req<AdminSites>("/admin/sites/import", { method: "POST" }),
+
+  index: () => req<IndexSite[]>("/admin/index"),
+  reconcile: (siteId?: string) =>
+    req<ReconcileResult[]>(`/admin/index/reconcile${siteId ? `?site_id=${encodeURIComponent(siteId)}` : ""}`,
+      { method: "POST" }),
+  rebuildIndex: (siteId: string) =>
+    req<ReconcileResult>("/admin/index/rebuild",
+      { method: "POST", ...json({ site_id: siteId, confirm_site_id: siteId }) }),
 
   devices: () => req<AdminDevice[]>("/admin/devices"),
   createDevice: (b: { device_id: string; site_id: string }) =>

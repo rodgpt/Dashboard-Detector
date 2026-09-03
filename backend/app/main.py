@@ -17,13 +17,22 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.database import init_db
 from app.routers import auth, admin, data, devices
+from app.services import scheduler
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings().validate_runtime()      # fail fast and loudly on missing secrets (R-4.3)
     init_db()
-    yield
+    # The reconcile pass is the index's correctness mechanism (R-12.4), and one
+    # that only runs when somebody remembers to call it is not a mechanism. In
+    # process rather than a cloud scheduler, because a cloud trigger would be
+    # exactly the runtime dependency R-1.1 forbids — see services/scheduler.py.
+    scheduler.start()
+    try:
+        yield
+    finally:
+        await scheduler.stop()
 
 
 app = FastAPI(title="OceanKind", version="2.0.0", lifespan=lifespan)

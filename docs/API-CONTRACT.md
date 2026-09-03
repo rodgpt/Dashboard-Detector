@@ -39,6 +39,9 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `PUT` | `/api/admin/sites/{id}` | cookie, admin | Rename, move, activate or deactivate |
 | `DELETE` | `/api/admin/sites/{id}` | cookie, admin | Remove a site. Refused while referenced |
 | `POST` | `/api/admin/sites/import` | cookie, admin | Seed the table from `_sites.json` |
+| `GET` | `/api/admin/index` | cookie, admin | Index drift per site and per day, plus when the pass last ran (R-12.5) |
+| `POST` | `/api/admin/index/reconcile` | cookie, admin | Run the reconcile now. `?site_id=` for one, omitted for all |
+| `POST` | `/api/admin/index/rebuild` | cookie, admin | Drop a site's index rows and rebuild from storage (R-12.2) |
 | `GET` | `/api/admin/devices` | cookie, admin | List devices with last contact time |
 | `POST` | `/api/admin/devices` | cookie, admin | Register a device. **The key is in this response only** |
 | `DELETE` | `/api/admin/devices/{id}` | cookie, admin | Revoke a device credential |
@@ -134,18 +137,22 @@ Response:
 
 ```jsonc
 {
-  "items":         [ /* event blobs, newest first, exactly as DATA-CONTRACT.md defines them */ ],
-  "total":         412,      // matching the filter, not the container
-  "limit":         50,
-  "offset":        0,
-  "has_more":      true,
-  "scanned_blobs": 118       // how much storage the query actually touched
+  "items":   [ /* event blobs, newest first, exactly as DATA-CONTRACT.md defines them */ ],
+  "total":   412,       // matching the filter, not the container
+  "limit":   50,
+  "offset":  0,
+  "has_more": true,
+  "index_updated_utc": "2026-08-26T14:02:11+00:00"   // or null
 }
 ```
 
-`scanned_blobs` is deliberately in the response. It was the number that told you whether a query was walking the right prefixes.
+**`scanned_blobs` was removed 2026-08-26, replaced by `index_updated_utc`.** The old field reported how much storage a query touched, which was the number that told you whether it was walking the right prefixes. Served from the index that number is always zero, and a field that keeps returning a plausible count describing no work at all is worse than absent.
 
-**It changes meaning under D-021.** Once the index serves this endpoint, a page costs zero blob reads, so the field either reports honestly (zero, or the rows examined) or it is removed. What it must not do is keep returning a plausible number that no longer describes any work. A response with `"items"` served from an index that is three days stale, and no way for the caller to know, is the same class of lie as a device reporting itself healthy while deaf, so the replacement to reach for is an index-freshness field rather than a scan count.
+What a caller actually needs to know is whether the answer is **current**. A page served from an index that stopped updating three days ago, with no way to tell, is the same class of lie as a device reporting itself healthy while deaf. So the replacement reports freshness: the most recent `indexed_utc` across the queried sites.
+
+**`null` means nothing has ever been indexed for those sites** — a fresh deployment, or an indexer that has never run. It is rendered, not hidden: an empty list of events reads identically whether there were no detections or no data is reaching us, and those mean opposite things.
+
+**Timestamps without an offset are read as UTC.** `?since=2026-08-01T00:00:00` is accepted and treated as UTC rather than rejected. Stated here so it is a convention rather than something inferred from behaviour. The previous implementation compared such a value against an offset-aware one and raised `TypeError` *outside* its guard, so it surfaced as an unhandled `500` — which R-5.6 forbids.
 
 **Ordering is newest first**, by `captured_utc`. The date-partitioned path layout gave this for free while the endpoint read storage; under D-021 it becomes an `ORDER BY` on an indexed column, which is the same answer arrived at more cheaply.
 
@@ -237,6 +244,20 @@ Three properties are contractual and each exists to stop a specific failure:
 *Historical note.* Until 2026-08-26 this section read "specified nowhere yet… stays unspecified until the device stops holding storage credentials of its own." That precondition was wrong: the device keeps its storage credentials and keeps writing the blob. D-022 records why — the event JSON is ~0.06% of the WAV it accompanies, and the blob is what the reconcile compares the index against. Drop it and the reconcile compares Postgres to itself.
 
 *Not in `DATA-CONTRACT.md`.* That file is canonical in `Rpi-Detector` and covers device→storage. A device→backend path is a change to the coupling itself and starts in the device repository.
+
+---
+
+## The detection index
+
+`GET /api/admin/index` reports, per site: blobs in storage over the reconcile window, rows indexed, the **drift** between them, and the days any drift falls on. It lists blob names and runs one query — it opens no blob and indexes nothing, so it is safe to call from a panel that refreshes.
+
+**Non-zero drift is a fault, not a statistic.** It means events exist in storage that the dashboard will not show, which is the same failure as a device reporting itself healthy while deaf.
+
+`last_run_utc` is reported alongside and is `null` until the pass has run. That pairing is the point: **zero drift that has never been checked is not evidence of anything**, and without it "the reconcile has been crashing for a week" looks identical to "the reconcile keeps finding nothing".
+
+`POST /api/admin/index/reconcile` runs the pass on demand. Safe to press twice — every write goes through the indexer, which is idempotent on `event_id` (R-12.3). It does not replace the timer; it exists so somebody investigating drift can act without waiting a day.
+
+`POST /api/admin/index/rebuild` drops a site's rows and repopulates them from object storage. It requires `site_id` and `confirm_site_id` to match, because a destructive action that needs no confirmation is one somebody performs by accident. **This is the proof that the index is derived** (R-12.2): if a rebuild cannot reproduce the same answers, something existed only in Postgres and the index had quietly become a second source of truth. Worth running deliberately, not only when something looks wrong.
 
 ---
 

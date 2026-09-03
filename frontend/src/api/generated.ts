@@ -71,6 +71,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Index Status
+         * @description Drift per site and per day, plus when the pass last ran (R-12.5).
+         *
+         *     Read-only and cheap: it lists blob *names* and runs one query per site. It
+         *     opens no blob and indexes nothing, which is what makes it safe to call from
+         *     a panel that refreshes.
+         *
+         *     Non-zero drift is a fault, not a statistic. It means events exist in storage
+         *     that the dashboard will not show — the same failure as a device reporting
+         *     itself healthy while deaf, and the reason this is a screen rather than a log
+         *     line.
+         */
+        get: operations["index_status_api_admin_index_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/index/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild Index
+         * @description Drop this site's index rows and rebuild them from object storage (R-12.2).
+         *
+         *     **This is the proof that the index is derived.** If a rebuild cannot
+         *     reproduce it, then something existed only in Postgres and the index had
+         *     quietly become a second source of truth — the exact thing D-021 rules out.
+         *     Worth running deliberately every so often, not only when something looks
+         *     wrong.
+         *
+         *     Losing these rows costs a pass, never a detection: object storage is the
+         *     record and every row here came from a blob that is still there.
+         */
+        post: operations["rebuild_index_api_admin_index_rebuild_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/index/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Reconcile
+         * @description Run the pass now, for one site or all of them.
+         *
+         *     Safe to press twice: every write goes through the indexer, which is
+         *     idempotent on `event_id` (R-12.3). It does not replace the timer — it exists
+         *     so somebody investigating drift can act on it without waiting a day.
+         */
+        post: operations["run_reconcile_api_admin_index_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/sites": {
         parameters: {
             query?: never;
@@ -270,6 +352,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Event
+         * @description **One detection, pushed by the device as it happens** (R-6.3, D-022).
+         *
+         *     This is the low-latency path and nothing more. The device writes the event
+         *     blob regardless of what happens here, so a failure costs freshness and never
+         *     an event: the weekly reconcile pass reads the same event out of storage. Any
+         *     change that makes correctness depend on this route has broken the design —
+         *     see `DATA-CONTRACT.md`, **Event upload**.
+         *
+         *     **`202` whether or not the event was already indexed.** A duplicate is the
+         *     expected case, not an error: a reconcile pass may have picked the event up
+         *     first, or the device may be retrying after an ambiguous timeout. Returning
+         *     `409` would push the device into tracking what it had successfully sent,
+         *     which is exactly the bookkeeping the unique constraint on `event_id` exists
+         *     to make unnecessary (R-12.3). There is no `409` on this route.
+         *
+         *     The document is stored verbatim. No `response_model`, no reshaping, no
+         *     validation beyond the handful of fields the index sorts and filters on — a
+         *     field the device adds must reach the browser, not be quietly dropped on the
+         *     way in, which is the same rule the rollup routes follow.
+         */
+        post: operations["push_event_api_devices_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -354,6 +474,9 @@ export interface paths {
         /**
          * Events
          * @description Paginated and filtered. The browser gets a page, never the history (R-5.1).
+         *
+         *     Served from the derived index, so this costs one query and no reads against
+         *     object storage regardless of the window (D-021, R-12.1).
          */
         get: operations["events_api_sites__site_id__events_get"];
         put?: never;
@@ -486,6 +609,8 @@ export interface components {
         EventsPage: {
             /** Has More */
             has_more: boolean;
+            /** Index Updated Utc */
+            index_updated_utc?: string | null;
             /** Items */
             items: {
                 [key: string]: unknown;
@@ -494,8 +619,6 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
-            /** Scanned Blobs */
-            scanned_blobs: number;
             /** Total */
             total: number;
         };
@@ -510,6 +633,44 @@ export interface components {
             status: string;
             /** Storage */
             storage: string;
+        };
+        /** IndexDayOut */
+        IndexDayOut: {
+            /** Blobs In Storage */
+            blobs_in_storage: number;
+            /** Day */
+            day: string;
+            /** Drift */
+            drift: number;
+            /** Indexed */
+            indexed: number;
+        };
+        /** IndexSiteOut */
+        IndexSiteOut: {
+            /** Blobs In Storage */
+            blobs_in_storage: number;
+            /** Days With Drift */
+            days_with_drift: components["schemas"]["IndexDayOut"][];
+            /** Drift */
+            drift: number;
+            /** Indexed */
+            indexed: number;
+            /** Last Run Error */
+            last_run_error?: string | null;
+            /** Last Run Ok */
+            last_run_ok?: boolean | null;
+            /** Last Run Trigger */
+            last_run_trigger?: string | null;
+            /** Last Run Utc */
+            last_run_utc?: string | null;
+            /** Since */
+            since: string;
+            /** Site Id */
+            site_id: string;
+            /** Until */
+            until: string;
+            /** Window Days */
+            window_days: number;
         };
         /** LoginIn */
         LoginIn: {
@@ -534,6 +695,30 @@ export interface components {
         Ok: {
             /** Ok */
             ok: boolean;
+        };
+        /** RebuildIn */
+        RebuildIn: {
+            /** Confirm Site Id */
+            confirm_site_id: string;
+            /** Site Id */
+            site_id: string;
+        };
+        /** ReconcileOut */
+        ReconcileOut: {
+            /** Conflicting */
+            conflicting: number;
+            /** Drift */
+            drift: number;
+            /** Error */
+            error?: string | null;
+            /** Newly Indexed */
+            newly_indexed: number;
+            /** Ok */
+            ok: boolean;
+            /** Rejected */
+            rejected: number;
+            /** Site Id */
+            site_id: string;
         };
         /** SiteIn */
         SiteIn: {
@@ -779,6 +964,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeviceConfigOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    index_status_api_admin_index_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexSiteOut"][];
+                };
+            };
+        };
+    };
+    rebuild_index_api_admin_index_rebuild_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_reconcile_api_admin_index_reconcile_post: {
+        parameters: {
+            query?: {
+                site_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcileOut"][];
                 };
             };
             /** @description Validation Error */
@@ -1137,6 +1406,42 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_event_api_devices_events_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-device-key": string;
+                "x-device-id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

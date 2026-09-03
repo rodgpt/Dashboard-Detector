@@ -27,6 +27,10 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+from sqlalchemy import func
+from sqlmodel import Session, col, select
+
+from app.core.models import DetectionEvent, as_utc
 from app.services.storage import Storage
 
 SCHEMA_VERSION = 2
@@ -41,9 +45,30 @@ def _day_prefixes(site: str, start: date, end: date) -> list[str]:
     return out
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Normalise a query bound to UTC.
+
+    A caller may send `?since=2026-08-01T00:00:00` with no offset. The previous
+    implementation compared that naive value against an offset-aware one, which
+    raises `TypeError` in Python — outside its guard, so it surfaced as an
+    unhandled 500 rather than an answer (R-5.6 says never a 500).
+
+    A missing offset is read as UTC. That is a documented convention rather than
+    a silent guess: every timestamp in this system is UTC, `captured_utc` is
+    required to say so explicitly, and rejecting a convenience query parameter
+    outright would break callers for no benefit. It is stated in
+    `API-CONTRACT.md` so nobody has to infer it from behaviour.
+
+    Same coercion as `models.as_utc`, kept as a named wrapper because the
+    *reason* differs: that one repairs what SQLite hands back, this one applies a
+    documented convention to caller input.
+    """
+    return as_utc(value)
+
+
 def list_events(
-    storage: Storage,
-    site: str,
+    db: Session,
+    site: str | list[str],
     since: Optional[datetime] = None,
     until: Optional[datetime] = None,
     event_type: Optional[str] = None,
@@ -52,47 +77,95 @@ def list_events(
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
+    """A page of detections, from the index (D-021, R-12.1).
 
-    until = until or datetime.now(timezone.utc)
-    since = since or (until - timedelta(days=7))
+    One query, zero reads against object storage, at any window size. The
+    envelope is unchanged from the storage-walking version this replaces, so the
+    frontend cannot tell the difference — which was the point: the mechanism
+    moved, the contract did not.
 
-    names: list[str] = []
-    for pfx in _day_prefixes(site, since.date(), until.date()):
-        names.extend(n for n in storage.list(pfx) if n.endswith(".json"))
-    names.sort(reverse=True)                      # newest first; paths sort chronologically
+    `site` accepts a list as well as a string. The route passes one today, but
+    cross-site queries are a thing the previous design could not express at all
+    (R-12.7) and this is the whole cost of allowing them.
+    """
+    until = _as_utc(until or datetime.now(timezone.utc))
+    since = _as_utc(since or (until - timedelta(days=7)))
 
-    matched, scanned = [], 0
-    for name in names:
-        scanned += 1
-        try:
-            ev = json.loads(storage.get(name))
-        except Exception:
-            continue                              # a malformed blob must not take the page down (R-5.6)
-        if ev.get("schema_version") != SCHEMA_VERSION:
-            ev["_unknown_schema"] = True          # surfaced, not swallowed
-        try:
-            captured = datetime.fromisoformat(ev["captured_utc"])
-        except Exception:
-            continue
-        if not (since <= captured <= until):
-            continue
-        if event_type and ev.get("event_type") != event_type:
-            continue
-        if (ev.get("score") or 0) < min_score:
-            continue
-        if not include_suppressed and ev.get("suppressed"):
-            continue
-        matched.append(ev)
+    sites = [site] if isinstance(site, str) else list(site)
 
-    page = matched[offset:offset + limit]
+    conditions = [
+        col(DetectionEvent.site_id).in_(sites),
+        DetectionEvent.captured_utc >= since,
+        DetectionEvent.captured_utc <= until,
+    ]
+    if event_type:
+        conditions.append(DetectionEvent.event_type == event_type)
+    if min_score:
+        # A null score is an absence, not a zero, so it cannot satisfy a
+        # minimum. Excluded rather than coerced (`score >= 0` would silently
+        # admit every unscored event the moment a filter is applied).
+        conditions.append(col(DetectionEvent.score) >= min_score)
+    if not include_suppressed:
+        conditions.append(col(DetectionEvent.suppressed).is_(False))
+
+    total = db.exec(
+        select(func.count()).select_from(DetectionEvent).where(*conditions)
+    ).one()
+
+    rows = db.exec(
+        select(DetectionEvent)
+        .where(*conditions)
+        # `event_id` breaks ties. Without a total order, two events sharing a
+        # `captured_utc` can swap places between requests, and offset pagination
+        # then skips one and repeats another — a page that silently omits a
+        # detection, which is the failure mode this whole subsystem is built to
+        # avoid.
+        .order_by(col(DetectionEvent.captured_utc).desc(),
+                  col(DetectionEvent.event_id).desc())
+        .offset(offset).limit(limit)
+    ).all()
+
+    items = []
+    for row in rows:
+        # The document is returned exactly as the device wrote it. The version
+        # flag is added on the way out rather than stored, so the record in the
+        # index stays byte-faithful to the blob (R-5.6, surfaced not swallowed).
+        doc = dict(row.document)
+        if doc.get("schema_version") != SCHEMA_VERSION:
+            doc["_unknown_schema"] = True
+        items.append(doc)
+
     return {
-        "items": page,
-        "total": len(matched),
+        "items": items,
+        "total": total,
         "limit": limit,
         "offset": offset,
-        "has_more": offset + len(page) < len(matched),
-        "scanned_blobs": scanned,                 # visible cost, so nobody has to guess
+        "has_more": offset + len(items) < total,
+        # `index_updated_utc` replaces `scanned_blobs` (D-021, D-022).
+        #
+        # A scan count served from an index describes no work at all, and would
+        # keep returning a plausible number forever. What a caller actually needs
+        # to know is whether the answer is current: a page served from an index
+        # that stopped updating three days ago, with no way to tell, is the same
+        # class of lie as a device reporting itself healthy while deaf.
+        "index_updated_utc": _index_updated(db, sites),
     }
+
+
+def _index_updated(db: Session, sites: list[str]) -> Optional[str]:
+    """When the index last took anything in for these sites.
+
+    `None` means nothing has ever been indexed — a fresh deployment, or an
+    indexer that has never run. Both are worth showing rather than hiding behind
+    an empty list of events, because "no detections" and "no data reaching us"
+    look identical to a reader and mean opposite things.
+    """
+    newest = db.exec(
+        select(func.max(DetectionEvent.indexed_utc))
+        .where(col(DetectionEvent.site_id).in_(sites))
+    ).one()
+    newest = as_utc(newest)
+    return newest.isoformat() if newest else None
 
 
 def read_json(storage: Storage, path: str) -> Optional[dict]:

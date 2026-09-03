@@ -11,6 +11,7 @@ import { admin, ApiError, type AdminDevice, type AdminUser, type Site, type Site
 import SitesPanel from "@/pages/Admin/SitesPanel";
 import UsersPanel from "@/pages/Admin/UsersPanel";
 import DevicesPanel from "@/pages/Admin/DevicesPanel";
+import IndexPanel from "@/pages/Admin/IndexPanel";
 
 export default function Admin() {
   const { me } = useAuth();
@@ -87,6 +88,7 @@ export default function Admin() {
             sites={sites} devices={devices}
             onChanged={setDevices} onError={(m) => setErrors((p) => [...p, m])}
           />
+          <IndexPanel />
         </>
       )}
     </div>

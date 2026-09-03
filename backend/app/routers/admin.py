@@ -4,10 +4,11 @@ import json
 import re
 import secrets
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
-from sqlmodel import Session, select, delete
+from sqlmodel import Session, select, delete, col
 
 from app.core.database import get_session
 from app.core.models import User, SiteAccess, Device, DeviceConfig, Site
@@ -353,3 +354,152 @@ def put_device_config(device_pk: int, body: dict, _: User = Depends(require_admi
     path = deviceconfig.publish(get_storage(), d.site_id, doc)
 
     return _state(d, row, clamp_notes=notes, published_to=path, publish_warning=warning)
+
+
+# ── the detection index: drift, reconcile, rebuild (R-12.2, R-12.5) ──────────
+#
+# The index is derived and must be *provably* derived. These three routes are
+# what make that checkable by a person rather than an assertion in a document:
+# what the drift is, when the pass last ran, and a way to rebuild from the
+# container and see the same answers come back.
+
+class IndexDayOut(BaseModel):
+    day: str
+    blobs_in_storage: int
+    indexed: int
+    drift: int
+
+
+class IndexSiteOut(BaseModel):
+    site_id: str
+    window_days: int
+    since: str
+    until: str
+    blobs_in_storage: int
+    indexed: int
+    drift: int
+    days_with_drift: list[IndexDayOut]
+    # Null means the pass has never run for this site. Shown rather than
+    # smoothed over: an index with zero drift that has never been checked is not
+    # the same as one that was checked an hour ago, and only one of them is
+    # evidence of anything.
+    last_run_utc: Optional[str] = None
+    last_run_ok: Optional[bool] = None
+    last_run_error: Optional[str] = None
+    last_run_trigger: Optional[str] = None
+
+
+@router.get("/index", response_model=list[IndexSiteOut])
+def index_status(_: User = Depends(require_admin), db: Session = Depends(get_session)):
+    """Drift per site and per day, plus when the pass last ran (R-12.5).
+
+    Read-only and cheap: it lists blob *names* and runs one query per site. It
+    opens no blob and indexes nothing, which is what makes it safe to call from
+    a panel that refreshes.
+
+    Non-zero drift is a fault, not a statistic. It means events exist in storage
+    that the dashboard will not show — the same failure as a device reporting
+    itself healthy while deaf, and the reason this is a screen rather than a log
+    line.
+    """
+    from app.core.models import IndexerRun
+    from app.services.reconcile import measure_drift
+    from app.services.sites import registry
+
+    items, _source = registry(db)
+    out: list[IndexSiteOut] = []
+    for site in items:
+        site_id = site.get("id")
+        if not site_id:
+            continue
+        r = measure_drift(db, get_storage(), site_id,
+                          days=settings().reconcile_window_days)
+        last = db.exec(select(IndexerRun)
+                       .where(IndexerRun.site_id == site_id)
+                       .order_by(col(IndexerRun.started_utc).desc())).first()
+        out.append(IndexSiteOut(
+            site_id=site_id,
+            window_days=settings().reconcile_window_days,
+            since=r.since.isoformat(), until=r.until.isoformat(),
+            blobs_in_storage=r.blobs_in_storage,
+            indexed=sum(d.already_indexed for d in r.days),
+            drift=r.drift,
+            days_with_drift=[
+                IndexDayOut(day=d.day.isoformat(), blobs_in_storage=d.blobs_in_storage,
+                            indexed=d.already_indexed, drift=d.drift)
+                for d in r.days_with_drift],
+            last_run_utc=last.started_utc.isoformat() if last else None,
+            last_run_ok=last.ok if last else None,
+            last_run_error=last.error if last else None,
+            last_run_trigger=last.trigger if last else None,
+        ))
+    return out
+
+
+class ReconcileOut(BaseModel):
+    site_id: str
+    newly_indexed: int
+    conflicting: int
+    rejected: int
+    drift: int
+    ok: bool
+    error: Optional[str] = None
+
+
+@router.post("/index/reconcile", response_model=list[ReconcileOut])
+def run_reconcile(site_id: Optional[str] = None,
+                  _: User = Depends(require_admin),
+                  db: Session = Depends(get_session)):
+    """Run the pass now, for one site or all of them.
+
+    Safe to press twice: every write goes through the indexer, which is
+    idempotent on `event_id` (R-12.3). It does not replace the timer — it exists
+    so somebody investigating drift can act on it without waiting a day.
+    """
+    from app.services import scheduler
+    runs = ([scheduler.run_once(site_id, trigger="manual")] if site_id
+            else scheduler.run_all(trigger="manual"))
+    return [ReconcileOut(site_id=r.site_id, newly_indexed=r.newly_indexed,
+                         conflicting=r.conflicting, rejected=r.rejected,
+                         drift=r.drift, ok=r.ok, error=r.error) for r in runs]
+
+
+class RebuildIn(BaseModel):
+    site_id: str
+    # Typing the site id is the whole guard. This drops rows deliberately, and a
+    # destructive action that needs no confirmation is one somebody performs by
+    # accident while looking at something else.
+    confirm_site_id: str
+
+
+@router.post("/index/rebuild", response_model=ReconcileOut)
+def rebuild_index(body: RebuildIn, _: User = Depends(require_admin),
+                  db: Session = Depends(get_session)):
+    """Drop this site's index rows and rebuild them from object storage (R-12.2).
+
+    **This is the proof that the index is derived.** If a rebuild cannot
+    reproduce it, then something existed only in Postgres and the index had
+    quietly become a second source of truth — the exact thing D-021 rules out.
+    Worth running deliberately every so often, not only when something looks
+    wrong.
+
+    Losing these rows costs a pass, never a detection: object storage is the
+    record and every row here came from a blob that is still there.
+    """
+    from app.core.models import DetectionEvent
+    from app.services import scheduler
+
+    if body.confirm_site_id != body.site_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "confirm_site_id must match site_id")
+
+    rows = db.exec(select(DetectionEvent)
+                   .where(DetectionEvent.site_id == body.site_id)).all()
+    for row in rows:
+        db.delete(row)
+    db.commit()
+
+    r = scheduler.run_once(body.site_id, trigger="manual")
+    return ReconcileOut(site_id=r.site_id, newly_indexed=r.newly_indexed,
+                        conflicting=r.conflicting, rejected=r.rejected,
+                        drift=r.drift, ok=r.ok, error=r.error)

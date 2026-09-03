@@ -194,6 +194,17 @@
       "title": "Has More",
       "type": "boolean"
      },
+     "index_updated_utc": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Index Updated Utc"
+     },
      "items": {
       "items": {
        "additionalProperties": true,
@@ -210,10 +221,6 @@
       "title": "Offset",
       "type": "integer"
      },
-     "scanned_blobs": {
-      "title": "Scanned Blobs",
-      "type": "integer"
-     },
      "total": {
       "title": "Total",
       "type": "integer"
@@ -224,8 +231,7 @@
      "total",
      "limit",
      "offset",
-     "has_more",
-     "scanned_blobs"
+     "has_more"
     ],
     "title": "EventsPage",
     "type": "object"
@@ -259,6 +265,129 @@
      "storage"
     ],
     "title": "Health",
+    "type": "object"
+   },
+   "IndexDayOut": {
+    "properties": {
+     "blobs_in_storage": {
+      "title": "Blobs In Storage",
+      "type": "integer"
+     },
+     "day": {
+      "title": "Day",
+      "type": "string"
+     },
+     "drift": {
+      "title": "Drift",
+      "type": "integer"
+     },
+     "indexed": {
+      "title": "Indexed",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "day",
+     "blobs_in_storage",
+     "indexed",
+     "drift"
+    ],
+    "title": "IndexDayOut",
+    "type": "object"
+   },
+   "IndexSiteOut": {
+    "properties": {
+     "blobs_in_storage": {
+      "title": "Blobs In Storage",
+      "type": "integer"
+     },
+     "days_with_drift": {
+      "items": {
+       "$ref": "#/components/schemas/IndexDayOut"
+      },
+      "title": "Days With Drift",
+      "type": "array"
+     },
+     "drift": {
+      "title": "Drift",
+      "type": "integer"
+     },
+     "indexed": {
+      "title": "Indexed",
+      "type": "integer"
+     },
+     "last_run_error": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Run Error"
+     },
+     "last_run_ok": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Run Ok"
+     },
+     "last_run_trigger": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Run Trigger"
+     },
+     "last_run_utc": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Run Utc"
+     },
+     "since": {
+      "title": "Since",
+      "type": "string"
+     },
+     "site_id": {
+      "title": "Site Id",
+      "type": "string"
+     },
+     "until": {
+      "title": "Until",
+      "type": "string"
+     },
+     "window_days": {
+      "title": "Window Days",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "site_id",
+     "window_days",
+     "since",
+     "until",
+     "blobs_in_storage",
+     "indexed",
+     "drift",
+     "days_with_drift"
+    ],
+    "title": "IndexSiteOut",
     "type": "object"
    },
    "LoginIn": {
@@ -317,6 +446,73 @@
      "ok"
     ],
     "title": "Ok",
+    "type": "object"
+   },
+   "RebuildIn": {
+    "properties": {
+     "confirm_site_id": {
+      "title": "Confirm Site Id",
+      "type": "string"
+     },
+     "site_id": {
+      "title": "Site Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "site_id",
+     "confirm_site_id"
+    ],
+    "title": "RebuildIn",
+    "type": "object"
+   },
+   "ReconcileOut": {
+    "properties": {
+     "conflicting": {
+      "title": "Conflicting",
+      "type": "integer"
+     },
+     "drift": {
+      "title": "Drift",
+      "type": "integer"
+     },
+     "error": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Error"
+     },
+     "newly_indexed": {
+      "title": "Newly Indexed",
+      "type": "integer"
+     },
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "rejected": {
+      "title": "Rejected",
+      "type": "integer"
+     },
+     "site_id": {
+      "title": "Site Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "site_id",
+     "newly_indexed",
+     "conflicting",
+     "rejected",
+     "drift",
+     "ok"
+    ],
+    "title": "ReconcileOut",
     "type": "object"
    },
    "SiteIn": {
@@ -802,6 +998,128 @@
     ]
    }
   },
+  "/api/admin/index": {
+   "get": {
+    "description": "Drift per site and per day, plus when the pass last ran (R-12.5).\n\nRead-only and cheap: it lists blob *names* and runs one query per site. It\nopens no blob and indexes nothing, which is what makes it safe to call from\na panel that refreshes.\n\nNon-zero drift is a fault, not a statistic. It means events exist in storage\nthat the dashboard will not show \u2014 the same failure as a device reporting\nitself healthy while deaf, and the reason this is a screen rather than a log\nline.",
+    "operationId": "index_status_api_admin_index_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/IndexSiteOut"
+         },
+         "title": "Response Index Status Api Admin Index Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Index Status",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/index/rebuild": {
+   "post": {
+    "description": "Drop this site's index rows and rebuild them from object storage (R-12.2).\n\n**This is the proof that the index is derived.** If a rebuild cannot\nreproduce it, then something existed only in Postgres and the index had\nquietly become a second source of truth \u2014 the exact thing D-021 rules out.\nWorth running deliberately every so often, not only when something looks\nwrong.\n\nLosing these rows costs a pass, never a detection: object storage is the\nrecord and every row here came from a blob that is still there.",
+    "operationId": "rebuild_index_api_admin_index_rebuild_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RebuildIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ReconcileOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Rebuild Index",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/index/reconcile": {
+   "post": {
+    "description": "Run the pass now, for one site or all of them.\n\nSafe to press twice: every write goes through the indexer, which is\nidempotent on `event_id` (R-12.3). It does not replace the timer \u2014 it exists\nso somebody investigating drift can act on it without waiting a day.",
+    "operationId": "run_reconcile_api_admin_index_reconcile_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "site_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Site Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ReconcileOut"
+         },
+         "title": "Response Run Reconcile Api Admin Index Reconcile Post",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Run Reconcile",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
   "/api/admin/sites": {
    "get": {
     "operationId": "list_sites_admin_api_admin_sites_get",
@@ -1259,6 +1577,66 @@
     ]
    }
   },
+  "/api/devices/events": {
+   "post": {
+    "description": "**One detection, pushed by the device as it happens** (R-6.3, D-022).\n\nThis is the low-latency path and nothing more. The device writes the event\nblob regardless of what happens here, so a failure costs freshness and never\nan event: the weekly reconcile pass reads the same event out of storage. Any\nchange that makes correctness depend on this route has broken the design \u2014\nsee `DATA-CONTRACT.md`, **Event upload**.\n\n**`202` whether or not the event was already indexed.** A duplicate is the\nexpected case, not an error: a reconcile pass may have picked the event up\nfirst, or the device may be retrying after an ambiguous timeout. Returning\n`409` would push the device into tracking what it had successfully sent,\nwhich is exactly the bookkeeping the unique constraint on `event_id` exists\nto make unnecessary (R-12.3). There is no `409` on this route.\n\nThe document is stored verbatim. No `response_model`, no reshaping, no\nvalidation beyond the handful of fields the index sorts and filters on \u2014 a\nfield the device adds must reach the browser, not be quietly dropped on the\nway in, which is the same rule the rollup routes follow.",
+    "operationId": "push_event_api_devices_events_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-device-key",
+      "required": true,
+      "schema": {
+       "title": "X-Device-Key",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-device-id",
+      "required": true,
+      "schema": {
+       "title": "X-Device-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "title": "Payload"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Push Event",
+    "tags": [
+     "devices"
+    ]
+   }
+  },
   "/api/health": {
    "get": {
     "operationId": "health_api_health_get",
@@ -1394,7 +1772,7 @@
   },
   "/api/sites/{site_id}/events": {
    "get": {
-    "description": "Paginated and filtered. The browser gets a page, never the history (R-5.1).",
+    "description": "Paginated and filtered. The browser gets a page, never the history (R-5.1).\n\nServed from the derived index, so this costs one query and no reads against\nobject storage regardless of the window (D-021, R-12.1).",
     "operationId": "events_api_sites__site_id__events_get",
     "parameters": [
      {

@@ -509,12 +509,33 @@ So the index is *not* justified by page latency; at tens of events per day the c
 
 **A bounding method, for when someone wants the real number.** Under v1 the cooldown erased suppressed detections (F-03), so each WhatsApp alert masked up to `cooldown_s / 5 s` events — 120 at the 600 s cooldown. If the client sees **N** alerts on a typical day, the v2 event rate is between N and 120N. That is answerable by asking them, without an Azure account.
 
+### Measured 2026-08-26: N = 10, and this partly reverses the finding above
+
+The client reports **roughly 10 WhatsApp alerts on a typical day**. Applying the bound:
+
+```
+lower   10 alerts × 1 window                 =    10 events/day
+upper   10 alerts × (600 s / 5 s) = ×120     = 1,200 events/day
+```
+
+**D-021's 864/day sits inside that range, near the top.** So the correct verdict on the 5% figure is *unsourced*, not *wrong* — and now that it is sourced it turns out to be plausible. The text above, and the Phase 1I note that followed from it, overstated the case by calling it refuted. Recorded here rather than quietly edited, because the overstatement was mine and the reasoning that produced it is worth keeping visible: two documents disagreeing by two orders of magnitude was a real problem, and "neither is measured" was the right diagnosis. "Therefore the smaller one is right" was not.
+
+Where in the range depends on how long a typical source sounds for, which nobody has measured either. A vessel passing for three minutes fires ~36 consecutive windows; an impulsive blast fires a handful, and per F-21 may fire none. **A few hundred events per day is the reasonable planning figure**, with 1,200 as the number to survive.
+
+**Two consequences.**
+
+*The index is justified on performance grounds after all*, not only on queryability and freshness. At 500 events/day a seven-day window is ~3,500 blobs, which is the D-021 scenario more or less intact. The queryability argument stands on its own and remains the better one, but it is no longer the only one.
+
+*The fixtures are unrealistic and cannot validate this work.* `generate_fixtures.py` produces 28–46 events per site per 14 days — 2–3 per day, **below even the lower bound** of the measurement. An index, a reconcile pass and a drift metric exercised against 128 events prove nothing about their behaviour at a few hundred per day, and `LocalStorage` will hide the difference exactly as it hid the original defect. Tracked in `TODO.md`.
+
 **Decision.**
 
 1. **The device POSTs each event to `POST /api/devices/events`**, authenticated with the per-device credential that R-6.1 already issues. This is the low-latency path.
 2. **The device also writes the event blob**, exactly as it does today. Unchanged.
 3. **Event Grid, and any blob-created notification mechanism, is dropped.** Not deferred — dropped.
-4. **A reconcile pass runs weekly** over a trailing window, diffing blob names against indexed `event_id`s and fetching only what is genuinely new.
+4. **A reconcile pass runs on a timer** over a trailing window, diffing blob names against indexed `event_id`s and fetching only what is genuinely new.
+
+   *Cadence tightened to daily, 2026-08-26.* This said weekly, chosen when the pass was assumed to cost something. Measured against a realistic tree (≈4,985 blobs over 20 days) a clean re-pass fetches **nothing** and takes 0.17 s — it diffs names and runs one query. Weekly set the worst case for an event whose push failed at seven days; daily makes it one, for the same effectively-zero cost. `OCEANKIND_RECONCILE_INTERVAL_HOURS`, default 24, and `0` disables the in-process timer for a deployment driving the pass from outside.
 5. **Audio is never bulk-read.** Clips are fetched one at a time, when a human asks for one.
 
 **Why the device still writes the blob, when it is also pushing.** This was the live question and it is worth recording the answer rather than the conclusion.

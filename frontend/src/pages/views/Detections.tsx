@@ -18,7 +18,7 @@ import Panel from "@/components/Panel";
 import { COLORS, baseOptions, catScale, lineStyle, timeScale, valueScale } from "@/lib/charts";
 import { useResource } from "@/hooks/useResource";
 import { data, type DetectionEvent, type EventType, type Page } from "@/api/client";
-import { formatDateTime } from "@/lib/time";
+import { formatDateTime, timeAgo } from "@/lib/time";
 
 const PAGE = 50;
 
@@ -154,9 +154,23 @@ export default function Detections({ siteId }: { siteId: string }) {
         actions={events.data && (
           <span className="panel-count">
             {events.data.total} evento{events.data.total === 1 ? "" : "s"}
-            <span className="panel-scan" title="Cuántos blobs tocó la consulta">
-              · {events.data.scanned_blobs} blobs leídos
-            </span>
+            {/*
+              Frescura del índice, no coste de la consulta. Una página servida
+              desde un índice que dejó de actualizarse hace tres días, sin manera
+              de saberlo, es la misma clase de mentira que un equipo que se
+              reporta sano estando sordo. Por eso `null` se dice en voz alta en
+              vez de omitirse.
+            */}
+            {events.data.index_updated_utc === null ? (
+              <span className="panel-scan warn" title="El índice no tiene ningún evento de este sitio">
+                · índice vacío
+              </span>
+            ) : (
+              <span className="panel-scan"
+                    title={`Última indexación: ${formatDateTime(events.data.index_updated_utc)}`}>
+                · índice actualizado {timeAgo(events.data.index_updated_utc)}
+              </span>
+            )}
           </span>
         )}
       >

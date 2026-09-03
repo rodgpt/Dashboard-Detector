@@ -23,9 +23,10 @@ make dev
 `frontend`, and applies migrations. The app is on **http://localhost:3000**. No
 cloud account, no device, no network.
 
-The backend is also published on :8000 for debugging, but use :3000 — that goes
-through nginx, which is the same origin and the same cookie behaviour as
-production. Hitting :8000 directly is neither.
+The backend is also published for debugging on `BACKEND_PORT` (see `.env` — it
+defaults to 8000 but is moved when another project on the machine holds that
+port). Use :3000 — that goes through nginx, which is the same origin and the same
+cookie behaviour as production. Hitting the backend directly is neither.
 
 Set `OCEANKIND_BOOTSTRAP_ADMIN_EMAIL` and `OCEANKIND_BOOTSTRAP_ADMIN_PASSWORD` in
 `.env` to create the first administrator on a fresh database. The email must be a
