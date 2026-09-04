@@ -1,0 +1,31 @@
+# Production / home-server overlay.
+#
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Two differences from the development file, both about not publishing things.
+#
+# 1. THE BACKEND PUBLISHES NO HOST PORT. It is an internal service; nginx reaches
+#    it as `backend:8000` on the compose network. The dev file publishes it for
+#    debugging, and on a shared machine that is one more port to collide over —
+#    plus anything published is reachable from the LAN, which for an API holding
+#    every secret in the system is not a debugging convenience worth having.
+#
+# 2. THE FRONTEND IS REACHABLE ONLY FROM LOCALHOST. cloudflared connects from the
+#    same host, so binding 127.0.0.1 keeps the app off the LAN entirely while the
+#    tunnel still works. Set FRONTEND_PORT to something free — see the port
+#    survey in docs/SERVER-INFRASTRUCTURE.md.
+#
+# If cloudflared runs as a container, prefer `docker-compose.tunnel.yml` instead:
+# it joins the same network and needs no published port at all.
+
+services:
+  backend:
+    # Compose *appends* ports across files, so clearing needs !reset
+    # (Compose v2.24+). Without it the dev mapping survives the override.
+    ports: !reset []
+
+  frontend:
+    # !override replaces the list rather than appending to it. Loopback only:
+    # cloudflared runs on this host, and nothing else needs to reach the app.
+    ports: !override
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:80"
