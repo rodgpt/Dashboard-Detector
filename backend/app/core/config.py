@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # Secure cookies require https. Off only for local http development.
     cookie_secure: bool = True
 
+    # How much the application says about itself. INFO shows the two timers
+    # starting and each reconcile pass; WARNING and above always reaches the
+    # stream, since that is where device alerts and drift warnings go.
+    log_level: str = "INFO"
+
     # first-run bootstrap. blank in normal operation (R-3.5)
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""

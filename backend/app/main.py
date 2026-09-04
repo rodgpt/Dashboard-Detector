@@ -9,6 +9,7 @@ Owns users, sessions, secrets and storage access. Depends on no cloud provider's
 identity or runtime, so it moves to AWS or a bare server by changing environment
 variables (R-1).
 """
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -20,8 +21,33 @@ from app.routers import auth, admin, data, devices
 from app.services import scheduler
 
 
+def _configure_logging() -> None:
+    """Make our own logs visible.
+
+    Without this the root logger sits at WARNING and every `log.info` in the
+    application is discarded — including both "scheduler started" lines. That
+    left the two timers the index and the silence alert depend on with no way to
+    confirm they were running: an operator could not tell a working scheduler
+    from one that never started, which is the failure mode this whole subsystem
+    is built to prevent.
+
+    `OCEANKIND_LOG_LEVEL` tunes it. WARNING and above still reaches the stream
+    whatever it is set to, because that is where device alerts and drift
+    warnings go.
+    """
+    level = getattr(logging, settings().log_level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+        force=True,          # uvicorn has already configured handlers by now
+    )
+    # Access logs are uvicorn's and stay at its own level; ours are the app's.
+    logging.getLogger("app").setLevel(level)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    _configure_logging()
     settings().validate_runtime()      # fail fast and loudly on missing secrets (R-4.3)
     init_db()
     # The reconcile pass is the index's correctness mechanism (R-12.4), and one

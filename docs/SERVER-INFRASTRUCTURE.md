@@ -2,7 +2,15 @@
 
 This app only. Ports, containers and the deployment shape.
 
-Adapted from `lynchLocalDev` on one point: this deploys to a **client's Azure subscription**, not the home server. So there is no Cloudflare Tunnel, no shared port registry, and no `SERVER-INFRASTRUCTURE.md` master file to reconcile against. Azure Container Apps terminates TLS at its own edge, which preserves the protocol's rule that we never run a reverse proxy for ingress or manage certificates ourselves.
+Adapted from `lynchLocalDev` on one point: this deploys to a **client's Azure subscription**, not the home server. So there is no Cloudflare Tunnel in the deployment, no shared port registry, and no `SERVER-INFRASTRUCTURE.md` master file to reconcile against. Azure Container Apps terminates TLS at its own edge, which preserves the protocol's rule that we never run a reverse proxy for ingress or manage certificates ourselves.
+
+> **A Cloudflare Tunnel does exist, as a bench rig, and is not the deployment shape.**
+> `marfutura.buenalynch.com` fronts a developer machine so the bench Pi can be
+> tested against a real hostname and real TLS without going to a coastline. It is
+> a faithful analogue of production — public hostname, TLS terminated upstream,
+> backend unaware — which is exactly why it is useful and exactly why it is easy
+> to mistake for the architecture. **Nothing in the client's deployment depends on
+> Cloudflare.** See *The bench tunnel* below.
 
 Last updated 2026-08-22 (D-019, D-020).
 
@@ -113,6 +121,33 @@ One `DeviceAlert` row per outage is what holds the line. The check may run 288 t
 | `OCEANKIND_SILENCE_WEBHOOK_URL` | Where a notification goes. Empty = log only |
 
 **No cloud-specific runtime.** Azure Container Apps today because the storage is there. The stack is three ordinary containers and moves to any host that runs them (R-1.1).
+
+---
+
+## The bench tunnel (test rig, not deployment)
+
+The device path is the reason this exists. A LAN test proves the uploader's logic and skips the entire transport: plain HTTP to a raw IP on a trusted network, versus HTTPS to a hostname through a public ingress. What that skips is DNS, TLS, certificate validation and ingress behaviour — and, most importantly, **the device's clock**. A Pi with no RTC that boots with a wrong date fails certificate validation outright, and the error looks nothing like a networking problem. Better found at a bench than on a coastline.
+
+**Point the tunnel at the `frontend` container, not the backend.**
+
+```
+cloudflared  ->  http://localhost:3000        (frontend / nginx)
+                   /       -> the built app
+                   /api/   -> proxy_pass http://backend:8000
+```
+
+One hostname serving both, exactly as production does. Pointing it at the backend instead would expose the API with no app in front of it and break the same-origin session cookie, which is the whole reason nginx owns both paths.
+
+The device then posts to `https://marfutura.buenalynch.com/api/devices/events` — through nginx, on `X-Device-Id`/`X-Device-Key` headers rather than a cookie.
+
+`OCEANKIND_COOKIE_SECURE=true` becomes both possible and correct once TLS is in front. **Consequence:** the session cookie is no longer set over plain http, so `http://localhost:3000` can no longer log in. Use the tunnel hostname for everything while it is up, or set the flag back to `false` to work offline.
+
+### Going public changes the threat model
+
+This rig makes a development instance reachable from the internet, with fixture data and whatever accounts the database happens to hold. Two things that are acceptable on a LAN are not acceptable on a public hostname:
+
+- **Any weak account is now exposed.** There is no password-change route in the API (`admin.py` creates and deletes users; it does not update passwords), and `init_db` only bootstraps when the user table is *empty* — so editing `OCEANKIND_BOOTSTRAP_ADMIN_PASSWORD` does nothing to an account that already exists. To rotate: create a second administrator with a strong password, log in as that one, delete the first.
+- **The device routes are not throttled.** `/api/auth/login` is (R-2.4, five failures per five minutes) precisely because argon2 verification is deliberately expensive. `/api/devices/events` and `/api/devices/config` do the same argon2 work on `X-Device-Key` with no limit. An unknown `device_id` is cheap — it fails the lookup before hashing — but a *known* one with a wrong key is not, and device ids are guessable (`Rpi_bench`). Worth a throttle before this is exposed for any length of time.
 
 ---
 
