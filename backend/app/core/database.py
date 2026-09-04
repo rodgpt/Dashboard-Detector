@@ -24,6 +24,15 @@ def engine():
 def init_db() -> None:
     """Bootstrap the first administrator on a fresh deployment (R-3.5).
 
+    **No minimum password length here.** There was one, matching the
+    create-user rule, and it refused to boot on a short
+    `OCEANKIND_BOOTSTRAP_ADMIN_PASSWORD`. Removed 2026-09-04: it turned a
+    first deployment into a restart loop over a value the operator chose
+    deliberately, and the length of your own bootstrap secret is your call.
+    The email *is* still validated, for a different reason — login validates
+    addresses, so a malformed one creates an administrator who genuinely
+    cannot sign in, and there is no password-change route to recover with.
+
     **The schema is Alembic's, not this function's.** `create_all` runs only on
     SQLite, where the tests use a throwaway file and there is no migration step.
     On Postgres, tables come from `make migrate` / `alembic upgrade head`; if a
@@ -48,8 +57,6 @@ def init_db() -> None:
         raise RuntimeError(
             "OCEANKIND_BOOTSTRAP_ADMIN_EMAIL is not a valid login email; "
             "use a real-format address (reserved domains like .local are rejected)")
-    if len(s.bootstrap_admin_password) < 12:
-        raise RuntimeError("OCEANKIND_BOOTSTRAP_ADMIN_PASSWORD must be at least 12 characters")
     with Session(engine()) as db:
         if db.exec(select(User)).first():
             return                       # already bootstrapped; do nothing
