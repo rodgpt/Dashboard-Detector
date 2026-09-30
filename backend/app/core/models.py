@@ -121,6 +121,54 @@ class Device(SQLModel, table=True):
     last_push_error: Optional[str] = None
 
 
+class DeviceStatus(SQLModel, table=True):
+    """Current health/telemetry snapshot per device (`DATA-CONTRACT.md`,
+    **Device heartbeat**). One row, upserted on every heartbeat POST.
+
+    This is what `GET /api/sites/{site_id}/status` reads for a unit with no
+    shared storage (Azure or a local bridge) configured — a bench Pi with
+    `STORAGE_ENABLED=False` could otherwise never be observed as alive at all,
+    which is a worse failure than the blob-only design it replaces. `Device.
+    last_seen` is stamped on *any* authenticated request (event pushes
+    included, per D-022) and is documented in `services/silence.py` as the
+    wrong liveness signal for exactly that reason; `reported_last_seen` here
+    is the device's own clock at the moment it built the payload, and only
+    ever advances — see the monotonic guard in `routers/devices.heartbeat`.
+    """
+    __tablename__ = "device_status"
+
+    device_id: int = Field(primary_key=True, foreign_key="device.id")
+    reported_last_seen: datetime = Field(sa_column=Column(_TZ_DATETIME, nullable=False))
+    received_utc: datetime = Field(
+        default_factory=_now, sa_column=Column(_TZ_DATETIME, nullable=False, default=_now))
+    payload: dict[str, Any] = Field(sa_column=Column(_JSON_DOC, nullable=False))
+
+
+class DeviceStatusHistory(SQLModel, table=True):
+    """Append-only log of every heartbeat received (**Device heartbeat**).
+
+    Cheap on purpose: one small JSONB row per heartbeat — roughly 2 KB at the
+    contract default of one per 60 s, about 2.7 MB/device/day — buys trend
+    queries (duty cycle over a week, a battery pattern before a fault) that
+    `DeviceStatus` alone cannot answer, since that table only ever holds the
+    latest snapshot and overwrites the rest.
+
+    No retention policy yet. Fine at current fleet size; revisit in `TODO.md`
+    once it is not.
+    """
+    __tablename__ = "device_status_history"
+    __table_args__ = (
+        Index("ix_device_status_history_device_received", "device_id", "received_utc"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    device_id: int = Field(index=True, foreign_key="device.id")
+    reported_last_seen: datetime = Field(sa_column=Column(_TZ_DATETIME, nullable=False))
+    received_utc: datetime = Field(
+        default_factory=_now, sa_column=Column(_TZ_DATETIME, nullable=False, default=_now))
+    payload: dict[str, Any] = Field(sa_column=Column(_JSON_DOC, nullable=False))
+
+
 class DetectionEvent(SQLModel, table=True):
     """A **derived** index over the event blobs (D-021, R-12.1).
 

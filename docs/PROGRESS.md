@@ -333,6 +333,18 @@ The monitoring tool must be honest about its own state. This is the half of the 
       sends 7 messages, not 2,016. All four volume knobs are in one block in `core/config.py` and
       documented in `SERVER-INFRASTRUCTURE.md`. Transport is a portable webhook, log-only until one
       is configured — Twilio stays blocked on F-04, and the alert is recorded either way
+- [x] **Liveness independent of storage (D-018, 2026-09-23).** The signal above depended entirely
+      on `status.json` reaching blob storage, so a unit with no Azure/local storage configured had
+      no liveness signal at all — invisible to the dashboard *and* to `silence.py`. `POST
+      /api/devices/heartbeat` now carries the same document directly, unconditional on storage,
+      backed by `DeviceStatus` (current) + `DeviceStatusHistory` (append-only trend, new tables via
+      `b48e6f1a9d02_device_status_heartbeat`). No retry on the device side — a stale heartbeat has
+      no recovery value — so correctness is enforced server-side: an out-of-order or duplicate POST
+      is silently ignored unless `last_seen` is strictly newer than what is stored. `silence.py` and
+      `GET /api/sites/{id}/status` both now read whichever of blob storage / the heartbeat table is
+      fresher, additively — the pre-existing 14 `silence.py` tests and full 98-test suite pass
+      unchanged alongside 11 new heartbeat tests (109/109). `DATA-CONTRACT.md` §Device heartbeat,
+      `API-CONTRACT.md` §Devices
 - [x] Per-panel "last loaded" timestamp (R-7.2) — every `Panel` carries "actualizado hace X" (2026-08-25)
 - [x] Every failed fetch visibly failed, with retry (R-7.1) — `hooks/useResource.ts` holds the rule once (2026-08-25)
 - [x] Each source fails independently; one 404 never takes the page down (R-7.3) — per-resource state, generation-guarded

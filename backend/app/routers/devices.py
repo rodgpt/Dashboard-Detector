@@ -7,7 +7,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Response, s
 from sqlmodel import Session, select
 
 from app.core.database import get_session
-from app.core.models import Device
+from app.core.models import Device, DeviceStatus, DeviceStatusHistory, as_utc
 from app.core.security import verify_password
 from app.core.config import settings
 from app.services import deviceconfig, indexer
@@ -126,3 +126,62 @@ def push_event(payload: Any = Body(...),
     # treats both as done; this is here so an operator debugging a spool drain
     # can tell a fresh event from a replay.
     return {"indexed": created, "event_id": payload.get("event_id")}
+
+
+@router.post("/heartbeat", status_code=status.HTTP_202_ACCEPTED)
+def heartbeat(payload: dict = Body(...),
+             device: Device = Depends(current_device),
+             db: Session = Depends(get_session)):
+    """**Health/telemetry, pushed every `heartbeat_interval_s`** (`DATA-CONTRACT.md`,
+    **Device heartbeat**).
+
+    Not an event: never touches `detection_event`, never goes through the
+    indexer, and carries no site-scoping check the way `/events` does — this
+    route is per-*device*, not per-*detection*, and `current_device` already
+    ties the credential to exactly one device, so there is nothing in the
+    payload that determines where this gets filed.
+
+    **Monotonic by `last_seen`, enforced here — not by the device's
+    discipline.** The device is built to never retry a failed heartbeat
+    (§Device heartbeat: a stale one has no value, and retrying risks
+    delivering a late one *after* a fresher one already landed, regressing
+    what the dashboard shows). This route accepts an out-of-order or
+    duplicate POST without error either way (still `202`: a device must never
+    treat this response as something to act on) but silently ignores it if it
+    is not newer than what is already stored. That is the second half of the
+    "no regression" guarantee — correctness lives here, structurally, not
+    only in the device behaving well.
+
+    Two writes, always together: `DeviceStatus` (upserted — what
+    `GET /api/sites/{site_id}/status` reads) and `DeviceStatusHistory`
+    (append-only — trend queries later). A heartbeat that updated "current"
+    without a history row would be a silent gap nothing else could surface.
+    """
+    reported = payload.get("last_seen") if isinstance(payload, dict) else None
+    if not isinstance(reported, str):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "last_seen (ISO 8601) is required")
+    try:
+        reported_dt = datetime.fromisoformat(reported)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "last_seen must be ISO 8601")
+    if reported_dt.tzinfo is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "last_seen must carry a UTC offset")
+    reported_dt = as_utc(reported_dt)
+
+    existing = db.get(DeviceStatus, device.id)
+    if existing and reported_dt <= as_utc(existing.reported_last_seen):
+        return {"accepted": False, "reason": "stale — not newer than the stored reading"}
+
+    now = datetime.now(timezone.utc)
+    if existing:
+        existing.reported_last_seen = reported_dt
+        existing.received_utc = now
+        existing.payload = payload
+        db.add(existing)
+    else:
+        db.add(DeviceStatus(device_id=device.id, reported_last_seen=reported_dt,
+                            received_utc=now, payload=payload))
+    db.add(DeviceStatusHistory(device_id=device.id, reported_last_seen=reported_dt,
+                               received_utc=now, payload=payload))
+    db.commit()
+    return {"accepted": True}

@@ -390,6 +390,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Heartbeat
+         * @description **Health/telemetry, pushed every `heartbeat_interval_s`** (`DATA-CONTRACT.md`,
+         *     **Device heartbeat**).
+         *
+         *     Not an event: never touches `detection_event`, never goes through the
+         *     indexer, and carries no site-scoping check the way `/events` does — this
+         *     route is per-*device*, not per-*detection*, and `current_device` already
+         *     ties the credential to exactly one device, so there is nothing in the
+         *     payload that determines where this gets filed.
+         *
+         *     **Monotonic by `last_seen`, enforced here — not by the device's
+         *     discipline.** The device is built to never retry a failed heartbeat
+         *     (§Device heartbeat: a stale one has no value, and retrying risks
+         *     delivering a late one *after* a fresher one already landed, regressing
+         *     what the dashboard shows). This route accepts an out-of-order or
+         *     duplicate POST without error either way (still `202`: a device must never
+         *     treat this response as something to act on) but silently ignores it if it
+         *     is not newer than what is already stored. That is the second half of the
+         *     "no regression" guarantee — correctness lives here, structurally, not
+         *     only in the device behaving well.
+         *
+         *     Two writes, always together: `DeviceStatus` (upserted — what
+         *     `GET /api/sites/{site_id}/status` reads) and `DeviceStatusHistory`
+         *     (append-only — trend queries later). A heartbeat that updated "current"
+         *     without a history row would be a silent gap nothing else could surface.
+         */
+        post: operations["heartbeat_api_devices_heartbeat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -528,7 +571,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Status */
+        /**
+         * Status
+         * @description The freshest of two independent liveness signals (**Device heartbeat**):
+         *     `status.json` in blob storage (the original design — durable, but only
+         *     exists when the device has Azure or a local bridge configured) and
+         *     `DeviceStatus` in Postgres (POSTed every heartbeat, unconditionally, no
+         *     storage dependency at all). Neither can starve the other: a unit with no
+         *     storage configured only ever has the second; a unit whose backend POST
+         *     failed on this exact tick still has the first, stale by at most one
+         *     heartbeat interval. `last_seen` decides which is newer — same field, same
+         *     shape, in both, since both are built from the identical `build_status()`
+         *     payload on the device.
+         */
         get: operations["status__api_sites__site_id__status_get"];
         put?: never;
         post?: never;
@@ -1437,6 +1492,44 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": unknown;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    heartbeat_api_devices_heartbeat_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-device-key": string;
+                "x-device-id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
             };
         };
         responses: {

@@ -1637,6 +1637,68 @@
     ]
    }
   },
+  "/api/devices/heartbeat": {
+   "post": {
+    "description": "**Health/telemetry, pushed every `heartbeat_interval_s`** (`DATA-CONTRACT.md`,\n**Device heartbeat**).\n\nNot an event: never touches `detection_event`, never goes through the\nindexer, and carries no site-scoping check the way `/events` does \u2014 this\nroute is per-*device*, not per-*detection*, and `current_device` already\nties the credential to exactly one device, so there is nothing in the\npayload that determines where this gets filed.\n\n**Monotonic by `last_seen`, enforced here \u2014 not by the device's\ndiscipline.** The device is built to never retry a failed heartbeat\n(\u00a7Device heartbeat: a stale one has no value, and retrying risks\ndelivering a late one *after* a fresher one already landed, regressing\nwhat the dashboard shows). This route accepts an out-of-order or\nduplicate POST without error either way (still `202`: a device must never\ntreat this response as something to act on) but silently ignores it if it\nis not newer than what is already stored. That is the second half of the\n\"no regression\" guarantee \u2014 correctness lives here, structurally, not\nonly in the device behaving well.\n\nTwo writes, always together: `DeviceStatus` (upserted \u2014 what\n`GET /api/sites/{site_id}/status` reads) and `DeviceStatusHistory`\n(append-only \u2014 trend queries later). A heartbeat that updated \"current\"\nwithout a history row would be a silent gap nothing else could surface.",
+    "operationId": "heartbeat_api_devices_heartbeat_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-device-key",
+      "required": true,
+      "schema": {
+       "title": "X-Device-Key",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-device-id",
+      "required": true,
+      "schema": {
+       "title": "X-Device-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Heartbeat",
+    "tags": [
+     "devices"
+    ]
+   }
+  },
   "/api/health": {
    "get": {
     "operationId": "health_api_health_get",
@@ -1991,6 +2053,7 @@
   },
   "/api/sites/{site_id}/status": {
    "get": {
+    "description": "The freshest of two independent liveness signals (**Device heartbeat**):\n`status.json` in blob storage (the original design \u2014 durable, but only\nexists when the device has Azure or a local bridge configured) and\n`DeviceStatus` in Postgres (POSTed every heartbeat, unconditionally, no\nstorage dependency at all). Neither can starve the other: a unit with no\nstorage configured only ever has the second; a unit whose backend POST\nfailed on this exact tick still has the first, stale by at most one\nheartbeat interval. `last_seen` decides which is newer \u2014 same field, same\nshape, in both, since both are built from the identical `build_status()`\npayload on the device.",
     "operationId": "status__api_sites__site_id__status_get",
     "parameters": [
      {

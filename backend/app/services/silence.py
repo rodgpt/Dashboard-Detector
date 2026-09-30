@@ -45,7 +45,7 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from app.core.config import settings
-from app.core.models import DeviceAlert, DeviceConfig, Device, as_utc
+from app.core.models import DeviceAlert, DeviceConfig, Device, DeviceStatus, as_utc
 from app.services.storage import Storage
 
 log = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ def threshold_seconds(db: Session, site_id: str) -> float:
                _heartbeat_s(db, site_id) * s.silence_after_missed_heartbeats)
 
 
-def _last_seen(storage: Storage, site_id: str) -> Optional[datetime]:
+def _last_seen_blob(storage: Storage, site_id: str) -> Optional[datetime]:
     """`status.json → last_seen`, or `generated_utc` if that is absent.
 
     Returns None when the blob is missing or unparseable. That is reported as
@@ -127,6 +127,36 @@ def _last_seen(storage: Storage, site_id: str) -> Optional[datetime]:
                 continue
             return as_utc(parsed)
     return None
+
+
+def _last_seen_heartbeat(db: Session, site_id: str) -> Optional[datetime]:
+    """`DeviceStatus.reported_last_seen` — POSTed every heartbeat, unconditional
+    on storage (`DATA-CONTRACT.md`, **Device heartbeat**). Added 2026-09-23: a
+    unit with no Azure/local storage configured previously had no liveness
+    signal at all, which meant it could never be checked for silence — the
+    exact failure this whole module exists to catch."""
+    device = db.exec(select(Device).where(Device.site_id == site_id)).first()
+    if not device:
+        return None
+    row = db.get(DeviceStatus, device.id)
+    return as_utc(row.reported_last_seen) if row else None
+
+
+def _last_seen(db: Session, storage: Storage, site_id: str) -> Optional[datetime]:
+    """The freshest of two independent signals, neither able to starve the
+    other: `status.json` in blob storage (original design; absent on a unit
+    with no storage configured) and `DeviceStatus` in Postgres (POSTed every
+    heartbeat regardless). A device reporting through only one of the two —
+    which is the normal case for a bench unit — is fully covered by that one;
+    this only has to choose when both exist.
+    """
+    blob = _last_seen_blob(storage, site_id)
+    hb = _last_seen_heartbeat(db, site_id)
+    if blob is None:
+        return hb
+    if hb is None:
+        return blob
+    return max(blob, hb)
 
 
 def _notify(alert: DeviceAlert, message: str) -> Optional[str]:
@@ -179,9 +209,9 @@ def check_site(db: Session, storage: Storage, site_id: str, *,
         .where(DeviceAlert.cleared_utc == None)                 # noqa: E711
     ).first()
 
-    last_seen = _last_seen(storage, site_id)
+    last_seen = _last_seen(db, storage, site_id)
     if last_seen is None:
-        # No usable status blob. Not treated as silence — see `_last_seen`.
+        # Neither signal usable — see `_last_seen`. Not treated as silence.
         return SilenceCheck(site_id, UNKNOWN,
                             detail="no readable status.json for this site")
 

@@ -10,7 +10,7 @@ Domain-only choices that affect nothing outside their folder can live in that fo
 
 ---
 
-> **Decision numbering is per repository, not global.** `Rpi-Detector` and `Dashboard-Detector` each keep their own sequence, and the same number can mean different things in each. **Always qualify a citation from the other repository** (`Rpi-Detector D-017`), never a bare number. Known divergences are flagged in the entries themselves: D-016 and D-017.
+> **Decision numbering is per repository, not global.** `Rpi-Detector` and `Dashboard-Detector` each keep their own sequence, and the same number can mean different things in each. **Always qualify a citation from the other repository** (`Rpi-Detector D-017`), never a bare number. Known divergences are flagged in the entries themselves: D-016, D-017 and D-018.
 
 ## Index
 
@@ -360,7 +360,7 @@ What this deliberately does not cover: rotating keys on deployed units nobody ca
 
 ## D-018 — Fleet-scale credential lifecycle: rotation over the wire, enrollment at the gate
 
-**Status:** PROPOSED
+**Status:** PROPOSED. This one is dashboard-local — `Rpi-Detector` carries a *different*, decided D-018 ("Liveness is a direct POST, not a storage side-effect"), which is the stack-level decision and the one `DATA-CONTRACT.md` cites. The numbers collided because the registers are independent, same as D-016 and D-017 before this. A bare "D-018" outside this file means the device's.
 
 **Context.** D-017 covers getting a key onto a unit that is on the bench. Two problems remain that D-017 cannot reach, and both grow with the fleet.
 

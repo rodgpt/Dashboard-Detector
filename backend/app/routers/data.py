@@ -2,16 +2,18 @@
 
 The browser never touches storage and never holds a credential (R-4.2, R-5.5).
 """
+import hashlib
+import json
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.database import get_session
-from app.core.models import User
+from app.core.models import User, Device, DeviceStatus, as_utc
 from app.core.security import current_user, assert_site_allowed, allowed_sites
 from app.services.storage import get_storage
 from app.services.events import list_events, read_json, read_json_with_etag
@@ -102,10 +104,69 @@ def _rollup(site_id: str, name: str, user: User, db: Session,
     return doc
 
 
+def _heartbeat_status(db: Session, site_id: str) -> tuple[Optional[dict], Optional[str]]:
+    """`DeviceStatus.payload` for the device registered to this site, plus an
+    ETag over it in the same shape `read_json_with_etag` uses (a quoted
+    truncated sha256), so both sources can share one conditional-GET path.
+
+    Assumes one reporting device per site, same as the blob path already did
+    (the v2 contract writes one `status.json` per site) — a site with more
+    than one registered device is not a shape this route resolves either way.
+    """
+    device = db.exec(select(Device).where(Device.site_id == site_id)).first()
+    if not device:
+        return None, None
+    row = db.get(DeviceStatus, device.id)
+    if not row:
+        return None, None
+    raw = json.dumps(row.payload, sort_keys=True).encode()
+    return row.payload, '"' + hashlib.sha256(raw).hexdigest()[:32] + '"'
+
+
 @router.get("/sites/{site_id}/status")
 def status_(site_id: str, request: Request, response: Response,
        user: User = Depends(current_user), db: Session = Depends(get_session)):
-    return _rollup(site_id, "status.json", user, db, request, response)
+    """The freshest of two independent liveness signals (**Device heartbeat**):
+    `status.json` in blob storage (the original design — durable, but only
+    exists when the device has Azure or a local bridge configured) and
+    `DeviceStatus` in Postgres (POSTed every heartbeat, unconditionally, no
+    storage dependency at all). Neither can starve the other: a unit with no
+    storage configured only ever has the second; a unit whose backend POST
+    failed on this exact tick still has the first, stale by at most one
+    heartbeat interval. `last_seen` decides which is newer — same field, same
+    shape, in both, since both are built from the identical `build_status()`
+    payload on the device.
+    """
+    assert_site_allowed(site_id, user, db)
+    blob_doc, blob_etag = read_json_with_etag(get_storage(), f"sites/{site_id}/status.json")
+    hb_doc, hb_etag = _heartbeat_status(db, site_id)
+
+    doc, etag = blob_doc, blob_etag
+    if hb_doc is not None:
+        blob_seen = as_utc(_parse_iso(blob_doc.get("last_seen"))) if blob_doc else None
+        hb_seen = as_utc(_parse_iso(hb_doc.get("last_seen")))
+        if blob_seen is None or (hb_seen is not None and hb_seen > blob_seen):
+            doc, etag = hb_doc, hb_etag
+
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "status.json unavailable for this site")
+
+    if etag:
+        response.headers["ETag"] = etag
+        response.headers["Cache-Control"] = "no-cache"
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED,
+                            headers={"ETag": etag, "Cache-Control": "no-cache"})
+    return doc
+
+
+def _parse_iso(value) -> Optional[datetime]:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 @router.get("/sites/{site_id}/power")

@@ -113,7 +113,7 @@ export default function Dashboard() {
 
       <nav className="tab-nav">
         {TABS.map((t) => (
-          <NavLink key={t.path} to={t.path}
+          <NavLink key={t.path} to={`/${t.path}`}
                    className={({ isActive }) => isActive ? "tab-btn active" : "tab-btn"}>
             {t.label}
           </NavLink>

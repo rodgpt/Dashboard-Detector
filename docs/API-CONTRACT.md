@@ -25,7 +25,7 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `GET` | `/api/auth/me` | cookie | Who am I, what role, which sites |
 | `GET` | `/api/sites` | cookie | Site registry, **filtered to what the caller may see** |
 | `GET` | `/api/sites/{site}/events` | cookie | Paginated, filtered detections |
-| `GET` | `/api/sites/{site}/status` | cookie | `status.json` for that site |
+| `GET` | `/api/sites/{site}/status` | cookie | `status.json` for that site — freshest of blob storage and the direct heartbeat POST (D-018) |
 | `GET` | `/api/sites/{site}/power` | cookie | `power_history.json` |
 | `GET` | `/api/sites/{site}/acoustic` | cookie | `acoustic_indicators.json` |
 | `GET` | `/api/sites/{site}/ocean` | cookie | `ocean_conditions.json` |
@@ -49,6 +49,7 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `PUT` | `/api/admin/devices/{id}/config` | cookie, admin | Tune. Clamped on write; adjustments reported back |
 | `GET` | `/api/devices/config` | device headers | **Debug view** of the published config blob, byte for byte. Not the delivery path |
 | `POST` | `/api/devices/events` | device headers | One detection, pushed. Low-latency path; idempotent on `event_id` (R-6.3, D-022) |
+| `POST` | `/api/devices/heartbeat` | device headers | `status.json`, pushed every heartbeat. No storage dependency; monotonic on `last_seen`, enforced here (D-018) |
 | `GET` | `/api/health` | none | Liveness and which storage backend is wired |
 
 Everything not in that table requires a session. `/api/health` and `/api/auth/login` are the only two exceptions, and neither returns data (R-2.1).
@@ -168,7 +169,7 @@ What a caller actually needs to know is whether the answer is **current**. A pag
 
 ## Rollup routes
 
-`/status`, `/power`, `/acoustic` and `/ocean` return the blob for that site, unmodified. The backend does not reshape, merge or enrich them. `DATA-CONTRACT.md` is the schema for all four.
+`/power`, `/acoustic` and `/ocean` return the blob for that site, unmodified. `/status` is the one exception (D-018): it returns whichever of the blob and the direct heartbeat POST carries the newer `last_seen`, and is otherwise unmodified either way — the backend composes nothing of its own even there, it only picks a source. `DATA-CONTRACT.md` is the schema for all four.
 
 Three rules carry through unchanged, and they are the backend's obligation now rather than the browser's:
 
@@ -244,6 +245,16 @@ Three properties are contractual and each exists to stop a specific failure:
 *Historical note.* Until 2026-08-26 this section read "specified nowhere yet… stays unspecified until the device stops holding storage credentials of its own." That precondition was wrong: the device keeps its storage credentials and keeps writing the blob. D-022 records why — the event JSON is ~0.06% of the WAV it accompanies, and the blob is what the reconcile compares the index against. Drop it and the reconcile compares Postgres to itself.
 
 *Not in `DATA-CONTRACT.md`.* That file is canonical in `Rpi-Detector` and covers device→storage. A device→backend path is a change to the coupling itself and starts in the device repository.
+
+### `POST /api/devices/heartbeat` — liveness, independent of storage (D-018)
+
+Same authentication as `/events`. The device posts its `status.json` document every heartbeat, in the same shape it (optionally) writes to blob storage — this route composes nothing of its own, same as `/events`, and `DATA-CONTRACT.md` §Device heartbeat is the schema.
+
+This is the opposite design from `/events` on the one property that matters most: **the device never retries a failed heartbeat.** A stale reading has no recovery value once superseded, and retrying risks delivering a late one after a fresher one already landed. Correctness is therefore enforced here, not by device discipline: the route accepts any `last_seen` (always `202`) but silently ignores one that is not strictly newer than what is already stored for that device — the response carries `{"accepted": false, ...}` in that case, which the device does not read and must not act on.
+
+Two tables, always written together on an accepted heartbeat: `DeviceStatus` (current, upserted — what `GET /api/sites/{site}/status` reads) and `DeviceStatusHistory` (append-only, one row per accepted heartbeat). An ignored heartbeat writes neither.
+
+*Why this exists rather than relying on `/events` plus the blob.* A unit with no storage configured at all previously had no liveness signal whatsoever — not to the dashboard, and not to `silence.py`'s device-silence alerting, which reads `status.json → last_seen` and had nothing to read. This route is what makes liveness independent of the storage decision. `GET /api/sites/{site}/status` and `silence.py` both read whichever of the blob or `DeviceStatus` is fresher, never assuming one exists.
 
 ---
 
