@@ -90,7 +90,42 @@ def test_by_day_is_sorted_and_sums_to_the_total(seeded):
 
 def test_empty_window_returns_zeroed_buckets_not_an_error(db):
     summary = event_summary(db, "matanzas", since=NOW - timedelta(days=1), until=NOW)
-    assert summary == {"by_day": [], "by_hour": [0] * 24, "total": 0}
+    assert summary["total"] == 0
+    assert summary["by_hour"] == [0] * 24
+    # Zero-filled, not omitted (see test_quiet_days_are_not_skipped below) —
+    # two calendar days span `since`..`until` here.
+    assert summary["by_day"] == [
+        {"date": "2026-08-25", "count": 0},
+        {"date": "2026-08-26", "count": 0},
+    ]
+
+
+def test_quiet_days_are_not_skipped_between_two_active_ones(db):
+    """The regression this exists to fix: a day with zero matching events must
+    appear as `count: 0`, not be missing from `by_day`. A line chart cannot
+    tell "zero" from "not plotted" — it connects whatever points it is given
+    — so omitting the 22nd through the 29th here would draw a climb from 11
+    events straight to 56, implying a gradual build-up that never happened.
+    """
+    day0 = datetime(2026, 9, 22, 10, 0, tzinfo=timezone.utc)
+    for i in range(11):
+        index_event(db, make(day0 + timedelta(minutes=i),
+                             f"q{i:03d}-0000-4000-8000-{i:012d}"), via=VIA_PUSH)
+    day8 = datetime(2026, 9, 30, 10, 0, tzinfo=timezone.utc)
+    for i in range(56):
+        index_event(db, make(day8 + timedelta(minutes=i),
+                             f"r{i:03d}-0000-4000-8000-{i:012d}"), via=VIA_PUSH)
+    db.commit()
+
+    summary = event_summary(db, "matanzas",
+                            since=day0 - timedelta(hours=1),
+                            until=day8 + timedelta(hours=1))
+    by_day = {row["date"]: row["count"] for row in summary["by_day"]}
+
+    assert by_day["2026-09-22"] == 11
+    assert by_day["2026-09-30"] == 56
+    for d in range(23, 30):   # the 23rd through the 29th: present, and zero
+        assert by_day[f"2026-09-{d}"] == 0
 
 
 def test_filters_match_list_events_exactly(seeded):

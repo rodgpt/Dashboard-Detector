@@ -177,6 +177,18 @@ def event_summary(
     see `as_utc`). The query still costs one indexed read of `captured_utc`
     alone, not the JSON documents, so a 90-day chart costs what a one-day
     chart costs.
+
+    `by_day` carries one entry per UTC calendar day in `[since, until]`,
+    including days with `count: 0`. Omitting zero days is tempting — they are
+    the majority of entries most of the time — but a line chart does not know
+    a day is missing versus not drawn: it connects the points it has. Eleven
+    events on the 22nd and fifty-six on the 30th with nothing in between
+    plotted as two points draws a climb from 11 to 56 across those eight
+    days, which is not what happened. A zero is a real answer here, not an
+    absence (unlike a missing `power_history` bucket, which means the device
+    may not have reported) — the query already covers every day in the
+    window, so "no matching events that day" is exactly what a missing key
+    would otherwise have hidden.
     """
     until = _as_utc(until or datetime.now(timezone.utc))
     since = _as_utc(since or (until - timedelta(days=7)))
@@ -200,6 +212,11 @@ def event_summary(
     ).all()
 
     by_day: dict[str, int] = {}
+    day = since.date()
+    while day <= until.date():
+        by_day[day.isoformat()] = 0
+        day += timedelta(days=1)
+
     by_hour = [0] * 24
     for value in stamps:
         ts = as_utc(value)

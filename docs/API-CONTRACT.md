@@ -179,6 +179,8 @@ Same filter parameters as `/events` (`since`, `until`, `event_type`, `min_score`
 
 Exists because `Detecciones`'s timeline and hour-of-day charts used to bucket whatever page `/events` returned. That is exactly right for the table and exactly wrong for a chart: a 30-day window holding more than one page's worth of events rendered as "the newest 50 events," not 30 days, no matter what the period selector said. This route answers for the whole window every time, at the same cost as `/events` — one indexed read of `captured_utc`, zero blob reads — so a 90-day chart costs what a one-day chart costs.
 
+**`by_day` has one entry for every UTC calendar day in `[since, until]`, including `count: 0`.** A day with no matching events is never omitted. A line chart cannot distinguish "zero" from "not plotted" — it draws a straight line between whatever points it has — so 11 events on the 22nd and 56 on the 30th, with nothing in between, must be plotted as 11, then seven zeros, then 56, or the chart shows a climb across those eight days that never happened. This is not the same situation as a missing `power_history` bucket: that gap means the device may not have reported, which must stay a gap. Here the query already covers every day in the window, so a day absent would mean only that this endpoint dropped a real zero on the way out.
+
 ---
 
 ## Rollup routes
