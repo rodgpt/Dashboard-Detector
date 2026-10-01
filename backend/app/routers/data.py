@@ -16,7 +16,7 @@ from app.core.database import get_session
 from app.core.models import User, Device, DeviceStatus, as_utc
 from app.core.security import current_user, assert_site_allowed, allowed_sites
 from app.services.storage import get_storage
-from app.services.events import list_events, read_json, read_json_with_etag
+from app.services.events import list_events, event_summary, read_json, read_json_with_etag
 
 router = APIRouter()
 
@@ -42,6 +42,12 @@ class EventsPage(BaseModel):
     # detections" and "no data reaching us" look identical and mean opposite
     # things.
     index_updated_utc: Optional[str] = None
+
+
+class EventsSummary(BaseModel):
+    by_day: list[dict]
+    by_hour: list[int]
+    total: int
 
 
 @router.get("/sites", response_model=SitesOut)
@@ -76,6 +82,28 @@ def events(
     assert_site_allowed(site_id, user, db)
     return list_events(db, site_id, since, until, event_type,
                        min_score, include_suppressed, limit, offset)
+
+
+@router.get("/sites/{site_id}/events/summary", response_model=EventsSummary)
+def events_summary(
+    site_id: str,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+    event_type: Optional[str] = Query(None, pattern="^(vessel|blast|unknown)$"),
+    min_score: float = Query(0.0, ge=0.0, le=1.0),
+    include_suppressed: bool = True,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_session),
+):
+    """Counts for the whole filtered window, not a page of it.
+
+    Same filters as `/events`, minus `limit`/`offset` — a chart is a claim
+    about the period asked for, not about whichever page happened to be
+    loaded. Backs the Detecciones timeline and hour-of-day charts.
+    """
+    assert_site_allowed(site_id, user, db)
+    return event_summary(db, site_id, since, until, event_type,
+                         min_score, include_suppressed)
 
 
 def _rollup(site_id: str, name: str, user: User, db: Session,

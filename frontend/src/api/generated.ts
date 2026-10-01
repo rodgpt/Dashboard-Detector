@@ -530,6 +530,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sites/{site_id}/events/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Events Summary
+         * @description Counts for the whole filtered window, not a page of it.
+         *
+         *     Same filters as `/events`, minus `limit`/`offset` — a chart is a claim
+         *     about the period asked for, not about whichever page happened to be
+         *     loaded. Backs the Detecciones timeline and hour-of-day charts.
+         */
+        get: operations["events_summary_api_sites__site_id__events_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sites/{site_id}/ocean": {
         parameters: {
             query?: never;
@@ -674,6 +698,17 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+            /** Total */
+            total: number;
+        };
+        /** EventsSummary */
+        EventsSummary: {
+            /** By Day */
+            by_day: {
+                [key: string]: unknown;
+            }[];
+            /** By Hour */
+            by_hour: number[];
             /** Total */
             total: number;
         };
@@ -1682,6 +1717,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    events_summary_api_sites__site_id__events_summary_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                until?: string | null;
+                event_type?: string | null;
+                min_score?: number;
+                include_suppressed?: boolean;
+            };
+            header?: never;
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventsSummary"];
                 };
             };
             /** @description Validation Error */

@@ -236,6 +236,36 @@
     "title": "EventsPage",
     "type": "object"
    },
+   "EventsSummary": {
+    "properties": {
+     "by_day": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "By Day",
+      "type": "array"
+     },
+     "by_hour": {
+      "items": {
+       "type": "integer"
+      },
+      "title": "By Hour",
+      "type": "array"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "by_day",
+     "by_hour",
+     "total"
+    ],
+    "title": "EventsSummary",
+    "type": "object"
+   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -1966,6 +1996,122 @@
      }
     },
     "summary": "Events",
+    "tags": [
+     "data"
+    ]
+   }
+  },
+  "/api/sites/{site_id}/events/summary": {
+   "get": {
+    "description": "Counts for the whole filtered window, not a page of it.\n\nSame filters as `/events`, minus `limit`/`offset` \u2014 a chart is a claim\nabout the period asked for, not about whichever page happened to be\nloaded. Backs the Detecciones timeline and hour-of-day charts.",
+    "operationId": "events_summary_api_sites__site_id__events_summary_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "since",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date-time",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Since"
+      }
+     },
+     {
+      "in": "query",
+      "name": "until",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date-time",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Until"
+      }
+     },
+     {
+      "in": "query",
+      "name": "event_type",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "pattern": "^(vessel|blast|unknown)$",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Event Type"
+      }
+     },
+     {
+      "in": "query",
+      "name": "min_score",
+      "required": false,
+      "schema": {
+       "default": 0.0,
+       "maximum": 1.0,
+       "minimum": 0.0,
+       "title": "Min Score",
+       "type": "number"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_suppressed",
+      "required": false,
+      "schema": {
+       "default": true,
+       "title": "Include Suppressed",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EventsSummary"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Events Summary",
     "tags": [
      "data"
     ]

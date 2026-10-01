@@ -165,6 +165,20 @@ What a caller actually needs to know is whether the answer is **current**. A pag
 
 **No response is ever served from audio.** Clips are fetched one at a time through the clip route when a human asks for one; nothing in this endpoint, the index or the reconcile pass ever opens a WAV.
 
+### `GET /api/sites/{site}/events/summary` — counts for a chart, not a page
+
+Same filter parameters as `/events` (`since`, `until`, `event_type`, `min_score`, `include_suppressed`), minus `limit`/`offset` — there is nothing to paginate.
+
+```jsonc
+{
+  "by_day":  [ { "date": "2026-08-20", "count": 14 }, /* … */ ],
+  "by_hour": [ 0, 0, 3, 1, /* … 24 entries, index = UTC hour */ ],
+  "total":   412
+}
+```
+
+Exists because `Detecciones`'s timeline and hour-of-day charts used to bucket whatever page `/events` returned. That is exactly right for the table and exactly wrong for a chart: a 30-day window holding more than one page's worth of events rendered as "the newest 50 events," not 30 days, no matter what the period selector said. This route answers for the whole window every time, at the same cost as `/events` — one indexed read of `captured_utc`, zero blob reads — so a 90-day chart costs what a one-day chart costs.
+
 ---
 
 ## Rollup routes

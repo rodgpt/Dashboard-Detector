@@ -152,6 +152,68 @@ def list_events(
     }
 
 
+def event_summary(
+    db: Session,
+    site: str | list[str],
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+    event_type: Optional[str] = None,
+    min_score: float = 0.0,
+    include_suppressed: bool = True,
+) -> dict:
+    """Per-day and per-hour-of-day counts over the whole filtered window.
+
+    Exists because the Detecciones charts used to bucket the page `list_events`
+    returned, which is exactly right for the table and exactly wrong for a
+    chart: "last 30 days" silently became "the newest 50 events" the moment a
+    period held more than one page. Same filters as `list_events`, but never
+    paginated, so the two can no longer disagree about what period they answer
+    for.
+
+    Bucketing happens in Python, not a SQL date/extract function. SQLite and
+    Postgres do not agree on either, and this file already carries two bugs
+    that came from exactly that kind of dialect-sensitive date arithmetic
+    (`_day_prefixes`'s `.date()`, and the reconcile pass's day bucketing —
+    see `as_utc`). The query still costs one indexed read of `captured_utc`
+    alone, not the JSON documents, so a 90-day chart costs what a one-day
+    chart costs.
+    """
+    until = _as_utc(until or datetime.now(timezone.utc))
+    since = _as_utc(since or (until - timedelta(days=7)))
+
+    sites = [site] if isinstance(site, str) else list(site)
+
+    conditions = [
+        col(DetectionEvent.site_id).in_(sites),
+        DetectionEvent.captured_utc >= since,
+        DetectionEvent.captured_utc <= until,
+    ]
+    if event_type:
+        conditions.append(DetectionEvent.event_type == event_type)
+    if min_score:
+        conditions.append(col(DetectionEvent.score) >= min_score)
+    if not include_suppressed:
+        conditions.append(col(DetectionEvent.suppressed).is_(False))
+
+    stamps = db.exec(
+        select(DetectionEvent.captured_utc).where(*conditions)
+    ).all()
+
+    by_day: dict[str, int] = {}
+    by_hour = [0] * 24
+    for value in stamps:
+        ts = as_utc(value)
+        key = ts.date().isoformat()
+        by_day[key] = by_day.get(key, 0) + 1
+        by_hour[ts.hour] += 1
+
+    return {
+        "by_day": [{"date": d, "count": n} for d, n in sorted(by_day.items())],
+        "by_hour": by_hour,
+        "total": len(stamps),
+    }
+
+
 def _index_updated(db: Session, sites: list[str]) -> Optional[str]:
     """When the index last took anything in for these sites.
 

@@ -269,7 +269,7 @@ The client's five views are rebuilt as React pages reading the API. The 3,129-li
 
 **Built against the extracted build list above, not against the fixtures.** The first four views were written from the fixture shapes and silently omitted ten sections of the client's product; that was caught, inventoried, and closed. All 23 sections in that list are now ported.
 
-- [x] `pages/views/Detections.tsx` — paginated events endpoint, not `manifest.json` (F-18). Filters for period, type and suppressed; a filter that hides events announces itself (2026-08-25)
+- [x] `pages/views/Detections.tsx` — paginated events endpoint, not `manifest.json` (F-18). Filters for period, type and suppressed; a filter that hides events announces itself (2026-08-25). Its two charts read `GET /api/sites/{site}/events/summary` rather than the loaded page, so "últimos 30 días" covers 30 days regardless of how many pages that is (found and fixed 2026-10-01, see `TODO.md`)
 - [x] `pages/views/SensorStatus.tsx` — health first and in words; `null` rendered as absence,
       never zero; thresholds shown as the values *in force* on the device (F-09's honest half);
       health fields the device sends but this version does not know are displayed raw rather

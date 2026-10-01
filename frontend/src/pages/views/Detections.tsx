@@ -11,13 +11,20 @@
  *  - `vessel` / `blast` / `unknown` se distinguen por texto y forma, no sólo
  *    por color (R-8.3, R-8.8).
  *  - Todo número puede ser `null`, y `null` no es cero.
+ *
+ * Los dos gráficos piden sus propios totales a `/events/summary` en vez de
+ * contar la página de la tabla. Antes bastaba con `items`, pero eso hacía que
+ * "últimos 30 días" mostrara en realidad los 50 eventos más recientes en
+ * cuanto el periodo pasaba de una página — un gráfico que dice cubrir 30 días
+ * y en realidad cubre lo que haya en la página es exactamente la clase de
+ * número que se cita fuera de contexto.
  */
 import { useMemo, useState } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import Panel from "@/components/Panel";
 import { COLORS, baseOptions, catScale, lineStyle, timeScale, valueScale } from "@/lib/charts";
 import { useResource } from "@/hooks/useResource";
-import { data, type DetectionEvent, type EventType, type Page } from "@/api/client";
+import { data, type DetectionEvent, type EventsSummary, type EventType, type Page } from "@/api/client";
 import { formatDateTime, timeAgo } from "@/lib/time";
 
 const PAGE = 50;
@@ -48,27 +55,26 @@ export default function Detections({ siteId }: { siteId: string }) {
     { pollMs: 60_000 },
   );
 
+  // Mismos filtros que `events`, sin `limit`/`offset`: los gráficos responden
+  // por el periodo pedido, no por la página que esté cargada en la tabla.
+  const summary = useResource<EventsSummary>(
+    () => data.eventsSummary(siteId, {
+      since, event_type: type || undefined, min_score: minScore || undefined,
+      include_suppressed: includeSuppressed,
+    }),
+    [siteId, days, type, includeSuppressed, minScore],
+    { pollMs: 60_000 },
+  );
+
   const reset = (fn: () => void) => { fn(); setOffset(0); };
 
-  /* Los dos gráficos resumen la **página cargada**, no el total del periodo.
-     Decirlo importa: un histograma que dice "24 alertas" cuando el periodo
-     tiene 300 es exactamente la clase de número que se cita fuera de contexto. */
-  const items = events.data?.items ?? [];
-  const { byDay, byHour } = useMemo(() => {
-    const day = new Map<string, number>();
-    const hour = Array.from({ length: 24 }, () => 0);
-    for (const ev of items) {
-      const d = new Date(ev.captured_utc);
-      if (isNaN(d.getTime())) continue;      // una fecha ilegible no rompe el gráfico
-      day.set(d.toISOString().slice(0, 10), (day.get(d.toISOString().slice(0, 10)) ?? 0) + 1);
-      hour[d.getUTCHours()]!++;
-    }
-    return {
-      byDay: [...day.entries()].sort(([a], [b]) => a.localeCompare(b))
-        .map(([ts, n]) => ({ x: new Date(ts + "T00:00:00Z").getTime(), y: n })),
-      byHour: hour,
-    };
-  }, [items]);
+  const byDay = useMemo(
+    () => (summary.data?.by_day ?? []).map(({ date, count }) => ({
+      x: new Date(date + "T00:00:00Z").getTime(), y: count,
+    })),
+    [summary.data],
+  );
+  const byHour = summary.data?.by_hour ?? Array.from({ length: 24 }, () => 0);
 
   return (
     <>
@@ -115,11 +121,19 @@ export default function Detections({ siteId }: { siteId: string }) {
         )}
       </div>
 
-      {items.length > 0 && (
+      {summary.failed && (
+        <p className="filter-warning" role="status">
+          No se pudieron cargar los totales del periodo para los gráficos.
+        </p>
+      )}
+
+      {summary.data && summary.data.total > 0 && (
         <div className="chart-row">
           <section className="panel">
             <div className="panel-head"><h2>Línea de tiempo</h2>
-              <span className="panel-meta panel-count">de la página cargada</span></div>
+              <span className="panel-meta panel-count">
+                {summary.data.total} evento{summary.data.total === 1 ? "" : "s"} del periodo
+              </span></div>
             <div className="chart-box short">
               <Line
                 data={{ datasets: [{ label: "Detecciones por día", data: byDay,

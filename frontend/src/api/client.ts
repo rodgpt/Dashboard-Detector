@@ -82,6 +82,15 @@ export interface Page<T> {
   index_updated_utc: string | null;
 }
 
+/** Counts over the whole filtered window, not a page of it — backs the
+ *  Detecciones charts, which must answer for the period asked, not for
+ *  whichever page of events happened to be loaded. */
+export interface EventsSummary {
+  by_day: { date: string; count: number }[];
+  by_hour: number[];
+  total: number;
+}
+
 export interface Me { email: string; role: "operator" | "admin"; sites: string[]; }
 
 export interface AdminUser {
@@ -140,19 +149,33 @@ export interface EventQuery {
   include_suppressed?: boolean; limit?: number; offset?: number;
 }
 
+/** The filter subset `/events` and `/events/summary` share — everything
+ *  except pagination, which the summary route has no use for. */
+function filterParams(q: EventQuery): URLSearchParams {
+  const p = new URLSearchParams();
+  if (q.since) p.set("since", q.since.toISOString());
+  if (q.until) p.set("until", q.until.toISOString());
+  if (q.event_type) p.set("event_type", q.event_type);
+  if (q.min_score != null) p.set("min_score", String(q.min_score));
+  if (q.include_suppressed != null) p.set("include_suppressed", String(q.include_suppressed));
+  return p;
+}
+
 export const data = {
   sites: () => req<{ sites: Site[] }>("/sites"),
 
   events(siteId: string, q: EventQuery = {}) {
-    const p = new URLSearchParams();
-    if (q.since) p.set("since", q.since.toISOString());
-    if (q.until) p.set("until", q.until.toISOString());
-    if (q.event_type) p.set("event_type", q.event_type);
-    if (q.min_score != null) p.set("min_score", String(q.min_score));
-    if (q.include_suppressed != null) p.set("include_suppressed", String(q.include_suppressed));
+    const p = filterParams(q);
     p.set("limit", String(q.limit ?? 50));
     p.set("offset", String(q.offset ?? 0));
     return req<Page<DetectionEvent>>(`/sites/${siteId}/events?${p}`);
+  },
+
+  /** Counts for the whole filtered period — never a page of it (see
+   *  `EventsSummary`). Backs the Detecciones timeline and hour-of-day charts. */
+  eventsSummary(siteId: string, q: EventQuery = {}) {
+    const p = filterParams(q);
+    return req<EventsSummary>(`/sites/${siteId}/events/summary?${p}`);
   },
 
   status: (s: string) => req<Record<string, unknown>>(`/sites/${s}/status`),
