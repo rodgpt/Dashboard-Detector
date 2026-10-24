@@ -140,6 +140,25 @@ def test_delete_revokes_device(admin_client):
     assert r.status_code == 401
 
 
+def test_delete_device_that_has_heartbeated(admin_client):
+    """device_status and device_status_history carry a FK to device.id with no
+    cascade (heartbeat migration). A device that has reported in at least once
+    — i.e. any real device — must still be deletable, not just a freshly
+    created one that never connected."""
+    r = admin_client.post("/api/admin/devices",
+                          json={"device_id": "Rpi_matanzas_hb", "site_id": "matanzas"})
+    key, pk = r.json()["key"], r.json()["id"]
+    creds = {"X-Device-Id": "Rpi_matanzas_hb", "X-Device-Key": key}
+    hb = admin_client.post("/api/devices/heartbeat", headers=creds, json={
+        "schema_version": 2, "site": "matanzas", "device": "Rpi_matanzas_hb",
+        "generated_utc": "2026-09-23T10:00:00+00:00",
+        "last_seen": "2026-09-23T10:00:00+00:00",
+        "health": {"detector_ok": True, "audio_ok": True, "duty_cycle_pct": 99.2},
+    })
+    assert hb.status_code == 202
+    assert admin_client.delete(f"/api/admin/devices/{pk}").status_code == 204
+
+
 # ── signed, clamped device configuration (R-6.2, F-10) ───────────────────────
 
 @pytest.fixture(scope="module")

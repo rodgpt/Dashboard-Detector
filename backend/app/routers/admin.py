@@ -11,7 +11,9 @@ from pydantic import BaseModel, EmailStr
 from sqlmodel import Session, select, delete, col
 
 from app.core.database import get_session
-from app.core.models import User, SiteAccess, Device, DeviceConfig, Site
+from app.core.models import (
+    User, SiteAccess, Device, DeviceConfig, DeviceStatus, DeviceStatusHistory, Site,
+)
 from app.core.security import require_admin, hash_password
 from app.core.config import settings
 from app.services.storage import get_storage
@@ -251,6 +253,12 @@ def delete_device(device_pk: int, _: User = Depends(require_admin),
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such device")
     db.exec(delete(DeviceConfig).where(DeviceConfig.device_id == d.device_id))
+    # device_status and device_status_history carry an integer FK to device.id
+    # with no ON DELETE CASCADE (see the heartbeat migration): leaving these
+    # behind means the device row itself can never be deleted once it has
+    # heartbeated once, which is every real device.
+    db.exec(delete(DeviceStatusHistory).where(DeviceStatusHistory.device_id == d.id))
+    db.exec(delete(DeviceStatus).where(DeviceStatus.device_id == d.id))
     db.delete(d); db.commit()
 
 
