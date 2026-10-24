@@ -13,10 +13,30 @@
 export const SITE_TZ = "America/Santiago";
 export const SITE_TZ_LABEL = "hora de Chile";
 
-const DATE_TIME = new Intl.DateTimeFormat("es-CL", {
-  timeZone: SITE_TZ, dateStyle: "short", timeStyle: "short", timeZoneName: "short",
+/**
+ * Component options, never `dateStyle`/`timeStyle` together with `timeZoneName`:
+ * ECMA-402 forbids the mix and Firefox enforces it with a TypeError. Chrome lets
+ * it through, which is how it reached production as a blank page — this ran at
+ * module load, so the whole bundle died before the first API call
+ * (2026-10-24, found on the live dashboard). Built inside a guard for the same
+ * reason: a formatter that cannot be constructed must degrade, not take the app
+ * with it.
+ */
+function formatter(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  try {
+    return new Intl.DateTimeFormat(locale, options);
+  } catch {
+    const { timeZoneName: _dropped, ...rest } = options;
+    try { return new Intl.DateTimeFormat(locale, rest); }
+    catch { return new Intl.DateTimeFormat(locale); }
+  }
+}
+
+const DATE_TIME = formatter("es-CL", {
+  timeZone: SITE_TZ, day: "2-digit", month: "2-digit", year: "numeric",
+  hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short",
 });
-const HOUR = new Intl.DateTimeFormat("en-US", { timeZone: SITE_TZ, hour: "2-digit", hour12: false });
+const HOUR = formatter("en-US", { timeZone: SITE_TZ, hour: "2-digit", hour12: false });
 
 function toDate(value: string | Date): Date {
   return typeof value === "string" ? new Date(value) : value;
