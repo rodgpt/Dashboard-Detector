@@ -12,6 +12,15 @@
  *    del evento (A11y, R-8.8).
  *  - **Fallar visible.** Si el clip no está, o el navegador no decodifica el
  *    WAV, lo dice. No deja un rectángulo negro que se lee como "silencio".
+ *
+ * Lección 2026-10-24 (review FE-01): durante un mes este componente NUNCA
+ * dibujó. Devolvía el párrafo "Analizando audio…" mientras calculaba, así que
+ * el <canvas> no estaba montado cuando llegaban los píxeles, `canvasRef` era
+ * null y `putImageData` nunca corría; después aparecía un lienzo vacío bajo una
+ * nota segura de sí misma — exactamente el rectángulo negro que la cabecera
+ * decía haber eliminado. Ahora el canvas está montado siempre y el dibujo vive
+ * en su propio efecto, que corre cuando hay píxeles Y lienzo; si aun así no
+ * puede dibujar, lo dice en vez de callar.
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -50,16 +59,19 @@ function fft(re: Float32Array, im: Float32Array): void {
 }
 
 interface Summary { peakHz: number; peakDb: number; bands: number; frames: number; seconds: number }
+interface Pixels { frames: number; bands: number; rgba: Uint8ClampedArray<ArrayBuffer> }
 
 export default function Spectrogram({ url, label }: { url: string; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [pixels, setPixels] = useState<Pixels | null>(null);
 
+  // 1) Descargar, decodificar, transformar. Produce píxeles; no toca el DOM.
   useEffect(() => {
     let cancelled = false;
-    setBusy(true); setError(null); setSummary(null);
+    setBusy(true); setError(null); setSummary(null); setPixels(null);
 
     (async () => {
       let ctx: AudioContext | null = null;
@@ -68,7 +80,9 @@ export default function Spectrogram({ url, label }: { url: string; label: string
         if (!res.ok) {
           throw new Error(res.status === 404
             ? "el clip no está en el almacenamiento"
-            : `no se pudo descargar el audio (${res.status})`);
+            : res.status === 401
+              ? "la sesión expiró; vuelve a iniciar sesión"
+              : `no se pudo descargar el audio (${res.status})`);
         }
         const bytes = await res.arrayBuffer();
         ctx = new AudioContext();
@@ -101,28 +115,22 @@ export default function Spectrogram({ url, label }: { url: string; label: string
         }
         if (cancelled) return;
 
-        const canvas = canvasRef.current;
-        if (canvas) {
-          canvas.width = frames; canvas.height = bands;
-          const g = canvas.getContext("2d");
-          if (g) {
-            const img = g.createImageData(frames, bands);
-            const floor = peak - 70;                   // 70 dB de rango dinámico
-            for (let f = 0; f < frames; f++) {
-              for (let b = 0; b < bands; b++) {
-                const v = Math.max(0, Math.min(1, (mags[f * bands + b]! - floor) / (peak - floor)));
-                // Azul profundo -> marca. Misma familia que el tema.
-                const px = ((bands - 1 - b) * frames + f) * 4;
-                img.data[px] = Math.round(12 + v * 88);
-                img.data[px + 1] = Math.round(34 + v * 143);
-                img.data[px + 2] = Math.round(48 + v * 149);
-                img.data[px + 3] = 255;
-              }
-            }
-            g.putImageData(img, 0, 0);
+        // Sobre un ArrayBuffer explícito: ImageData no acepta un buffer compartido.
+        const rgba = new Uint8ClampedArray(new ArrayBuffer(frames * bands * 4));
+        const floor = peak - 70;                   // 70 dB de rango dinámico
+        for (let f = 0; f < frames; f++) {
+          for (let b = 0; b < bands; b++) {
+            const v = Math.max(0, Math.min(1, (mags[f * bands + b]! - floor) / (peak - floor)));
+            // Azul profundo -> marca. Misma familia que el tema.
+            const px = ((bands - 1 - b) * frames + f) * 4;
+            rgba[px] = Math.round(12 + v * 88);
+            rgba[px + 1] = Math.round(34 + v * 143);
+            rgba[px + 2] = Math.round(48 + v * 149);
+            rgba[px + 3] = 255;
           }
         }
 
+        setPixels({ frames, bands, rgba });
         setSummary({
           peakHz: Math.round((peakBand * rate) / FFT_SIZE),
           peakDb: +peak.toFixed(1),
@@ -139,24 +147,37 @@ export default function Spectrogram({ url, label }: { url: string; label: string
     return () => { cancelled = true; };
   }, [url]);
 
-  if (busy) return <p className="loading">Analizando audio…</p>;
+  // 2) Dibujar, cuando hay píxeles. El canvas está montado desde el primer
+  //    render, así que la ref existe; si no, es un error que se ve.
+  useEffect(() => {
+    if (!pixels) return;
+    const canvas = canvasRef.current;
+    if (!canvas) { setError("no se pudo dibujar: el lienzo no está montado"); return; }
+    canvas.width = pixels.frames;
+    canvas.height = pixels.bands;
+    const g = canvas.getContext("2d");
+    if (!g) { setError("no se pudo dibujar: el navegador no entrega contexto 2D"); return; }
+    g.putImageData(new ImageData(pixels.rgba, pixels.frames, pixels.bands), 0, 0);
+  }, [pixels]);
 
-  if (error) {
-    return (
-      <div className="banner error" role="alert">
-        No se pudo generar el espectrograma de {label}: {error}.
-      </div>
-    );
-  }
+  const drawn = pixels !== null && error === null;
 
   return (
     <>
+      {busy && <p className="loading" aria-live="polite">Analizando audio…</p>}
+      {error && (
+        <div className="banner error" role="alert">
+          No se pudo generar el espectrograma de {label}: {error}.
+        </div>
+      )}
       <canvas ref={canvasRef} className="spectrogram"
+              hidden={!drawn}
               role="img"
+              aria-busy={busy || undefined}
               aria-label={summary
                 ? `Espectrograma de ${label}. ${summary.seconds} segundos, ${summary.bands} bandas. Pico en ${summary.peakHz} hercios a ${summary.peakDb} decibelios.`
                 : `Espectrograma de ${label}`} />
-      {summary && (
+      {drawn && summary && (
         <p className="chart-note">
           {summary.seconds} s · {summary.frames} ventanas · {summary.bands} bandas ·
           pico en <strong>{summary.peakHz} Hz</strong> ({summary.peakDb} dB).

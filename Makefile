@@ -81,6 +81,10 @@ logs:
 # dev-loop papercut: `make fixtures` writes a whole new tree with new event ids,
 # and the reconcile pass only ever *adds*, so the old rows linger forever and
 # the detections list fills with events whose clips no longer exist.
+#
+# `full=True` (2026-10-24): the pass after the drop reaches back to the oldest
+# blob in storage. Before, it covered only the trailing window, so this target
+# silently truncated any site with more than a fortnight of history (BE-01).
 reindex:
 	docker compose run --rm backend python -c "\
 from sqlmodel import Session, select; \
@@ -92,7 +96,7 @@ n = len(db.exec(select(DetectionEvent)).all()); \
 [db.delete(r) for r in db.exec(select(DetectionEvent)).all()]; \
 db.commit(); db.close(); \
 print(f'dropped {n} rows'); \
-[print(f\"  {r.site_id}: {r.newly_indexed} indexed, drift={r.drift}\") for r in scheduler.run_all(trigger='manual')]"
+[print(f\"  {r.site_id}: {r.newly_indexed} indexed over {r.window_days}d, drift={r.drift}\") for r in scheduler.run_all(trigger='rebuild', full=True)]"
 
 # RECONCILE_INTERVAL_HOURS=0 switches off the in-process reconcile timer. Tests
 # drive the pass explicitly; a background one would make them non-deterministic

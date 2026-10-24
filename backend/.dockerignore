@@ -1,0 +1,11 @@
+# Never ship bytecode or test caches into the image. The compiled stub
+# migrations that lived in alembic/versions/__pycache__ with no .py source
+# (70a7f8910db4, a66d9ae43682) got here this way — see
+# docs/SERVER-INFRASTRUCTURE.md, "Recovering a database stamped at a deleted
+# revision".
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.env
+*.db

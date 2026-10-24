@@ -14,6 +14,10 @@ interface AuthState {
   loading: boolean;
   /** The server was unreachable — different from "not logged in" (R-7.1). */
   offline: boolean;
+  /** The server answered, but not with a session or a 401: a 5xx, a proxy
+   *  page, a 503. Also not "logged out" — and not "offline" either, which is
+   *  what it used to be called (review FE-08). */
+  serverError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -25,16 +29,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   async function refresh() {
     try {
       setMe(await auth.me());
       setOffline(false);
+      setServerError(null);
     } catch (err) {
       setMe(null);
-      // A 401 means "log in". Anything else means we could not ask, which must
-      // not be rendered as a clean logged-out state.
-      setOffline(err instanceof ApiError && !err.isAuth);
+      // A 401 means "log in". Unreachable means offline. Anything else means
+      // the server is there and broken, which must not be rendered as a clean
+      // logged-out state nor as a dead network.
+      const api = err instanceof ApiError ? err : null;
+      setOffline(api?.isOffline ?? true);
+      setServerError(api && !api.isAuth && !api.isOffline ? `${api.status} ${api.message}` : null);
     } finally {
       setLoading(false);
     }
@@ -43,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => { void refresh(); }, []);
 
   const value: AuthState = {
-    me, loading, offline,
+    me, loading, offline, serverError,
     async signIn(email, password) {
       await auth.login(email, password);
       await refresh();

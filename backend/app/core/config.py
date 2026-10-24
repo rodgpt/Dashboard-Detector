@@ -111,14 +111,26 @@ class Settings(BaseSettings):
     # the contract's default for `heartbeat_interval_s`.
     assumed_heartbeat_s: float = 60.0
 
+    # How far ahead of the server a heartbeat's `last_seen` may be before it is
+    # rejected as a wrong device clock (400). Generous enough for drift on a
+    # unit whose NTP is a little behind; tight enough that a Pi booting without
+    # a time source cannot poison its own status row (review BE-02).
+    heartbeat_max_future_s: float = 300.0
+
 
     def validate_runtime(self) -> None:
         if len(self.session_secret) < 32:
             raise RuntimeError("OCEANKIND_SESSION_SECRET missing or too short (need 32+ chars)")
         if self.storage_backend == "azure" and not self.azure_connection_string:
             raise RuntimeError("storage_backend=azure but OCEANKIND_AZURE_CONNECTION_STRING is unset")
-        if self.storage_backend == "s3" and not self.s3_bucket:
-            raise RuntimeError("storage_backend=s3 but OCEANKIND_S3_BUCKET is unset")
+        # Only backends `services/storage.get_storage` can build. `s3` is a
+        # documented option with no class behind it yet; accepting it here let
+        # the process boot and then 500 on every data request while /api/health
+        # said ok (review BE-07b). Refuse to start instead.
+        if self.storage_backend not in ("local", "azure"):
+            raise RuntimeError(
+                f"storage_backend={self.storage_backend!r} is not implemented "
+                "(services/storage.py knows local and azure)")
 
 
 @lru_cache

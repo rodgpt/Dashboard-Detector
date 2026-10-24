@@ -92,17 +92,17 @@ export default function SitesPanel({ sites, source, onChanged, onError }: Props)
       <h2>Sitios</h2>
 
       {source === "storage" && (
-        <div className="form-feedback" style={{ background: "var(--warn-fill)", border: "1px solid var(--warn)", color: "var(--text)" }} role="status">
-          Estos sitios vienen del archivo <code>_sites.json</code> en el
-          almacenamiento y todavía no se gestionan aquí. Impórtalos para poder
-          editarlos; en un contenedor nuevo ese archivo no existe y no habrá
-          ningún sitio hasta crear el primero.
-          <div>
-            <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 10 }}
-                    onClick={() => void importFromStorage()}>
-              Importar desde el almacenamiento
-            </button>
-          </div>
+        <div className="banner warn" role="status">
+          <span>
+            Estos sitios vienen del archivo <code>_sites.json</code> en el
+            almacenamiento y todavía no se gestionan aquí. Impórtalos para poder
+            editarlos; en un contenedor nuevo ese archivo no existe y no habrá
+            ningún sitio hasta crear el primero.
+          </span>
+          <button type="button" className="btn btn-ghost btn-sm"
+                  onClick={() => void importFromStorage()}>
+            Importar desde el almacenamiento
+          </button>
         </div>
       )}
 

@@ -4,6 +4,27 @@
  */
 
 export interface paths {
+    "/api/admin/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Alerts
+         * @description Open device alerts across every site (admin). Newest first. `open_only=false`
+         *     also returns cleared ones, for the outage history.
+         */
+        get: operations["list_alerts_api_admin_alerts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/devices": {
         parameters: {
             query?: never;
@@ -71,6 +92,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/devices/{device_pk}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Reset Device Status
+         * @description Forget the device's *current* heartbeat reading; history is kept.
+         *
+         *     The heartbeat route is monotonic on the device's own `last_seen`. A unit
+         *     whose clock was wrong (a Pi without an RTC booting a year ahead) can leave a
+         *     reading no correct heartbeat will ever beat, and until 2026-10-24 nothing
+         *     could clear it short of deleting the device. The route now refuses
+         *     far-future timestamps, so this is the escape hatch for a reading accepted
+         *     before that, or for a clock that was merely a few minutes fast.
+         */
+        delete: operations["reset_device_status_api_admin_devices__device_pk__status_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/index": {
         parameters: {
             query?: never;
@@ -121,6 +169,13 @@ export interface paths {
          *
          *     Losing these rows costs a pass, never a detection: object storage is the
          *     record and every row here came from a blob that is still there.
+         *
+         *     **The pass that follows covers the whole history, not the trailing window.**
+         *     Until 2026-10-24 it reconciled only `reconcile_window_days`, so a rebuild on
+         *     any site with more than a fortnight of events quietly threw the rest away —
+         *     and drift read zero afterwards, because drift is measured over the same
+         *     window (review BE-01). `scheduler.run_once(full=True)` lists the `events/`
+         *     prefix to find the oldest day and reconciles from there.
          */
         post: operations["rebuild_index_api_admin_index_rebuild_post"];
         delete?: never;
@@ -330,15 +385,16 @@ export interface paths {
         };
         /**
          * Device Config
-         * @description **Read-only debugging view of the configuration blob** (D-020).
+         * @description **The configuration blob, byte for byte** (D-020).
          *
-         *     This is not the delivery path. The device reads
-         *     `sites/{site_id}/remote_config.json` from storage, which the backend writes
-         *     when configuration is tuned. This route exists so an operator can see what a
-         *     unit will receive without opening a storage browser, and it returns the blob
-         *     **byte for byte** — reading it here and reading it from storage must never
-         *     produce two different documents, because that is how a signature mismatch
-         *     hides.
+         *     Two consumers. A unit with storage configured reads
+         *     `sites/{site_id}/remote_config.json` from storage itself and uses this route
+         *     only as a debugging view. A **push-only** unit (no Azure, no local output
+         *     directory — the QUICKGUIDE provisioning path) has no blob to read and polls
+         *     this route every `CONFIG_CHECK_INTERVAL` instead (device F-34, 2026-10-24).
+         *     Either way it returns the stored document **byte for byte** — reading it
+         *     here and reading it from storage must never produce two different
+         *     documents, because that is how a signature mismatch hides.
          *
          *     It deliberately does not compose a document of its own. If the blob is
          *     absent, that is the honest answer: nothing has been published for this site.
@@ -487,6 +543,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sites/{site_id}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Site Alerts
+         * @description Device alerts for one site (R-7.5): the outages `silence.py` recorded.
+         *
+         *     Until 2026-10-24 these rows were written and read by nothing — a dead unit
+         *     was a WARNING in a container log. This is what lets the dashboard show
+         *     "este sitio lleva N horas sin reportar" on the page the operator actually
+         *     opens (review BE-05). Admin-wide listing: `GET /api/admin/alerts`.
+         */
+        get: operations["site_alerts_api_sites__site_id__alerts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sites/{site_id}/clips/{path}": {
         parameters: {
             query?: never;
@@ -497,6 +578,11 @@ export interface paths {
         /**
          * Clip
          * @description Audio proxied through the API, so the container stays private (R-5.4).
+         *
+         *     `path` is a blob name under `sites/{site}/clips/`: `YYYY/MM/DD/{event_id}.wav`.
+         *     Each segment is validated before it is joined, and `LocalStorage` resolves
+         *     and contains the result as well — two independent guards against a URL
+         *     walking out of the storage tree (review BE-04, 2026-10-24).
          */
         get: operations["clip_api_sites__site_id__clips__path__get"];
         put?: never;
@@ -543,9 +629,32 @@ export interface paths {
          *
          *     Same filters as `/events`, minus `limit`/`offset` — a chart is a claim
          *     about the period asked for, not about whichever page happened to be
-         *     loaded. Backs the Detecciones timeline and hour-of-day charts.
+         *     loaded. Backs the Detecciones timeline and hour-of-day charts; with
+         *     `?hourly=true`, also the sensor uptime grid and the Análisis cross-charts.
          */
         get: operations["events_summary_api_sites__site_id__events_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sites/{site_id}/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Event
+         * @description One event by id, as the device wrote it (R-8.5). Declared after
+         *     `/events/summary` on purpose: FastAPI matches routes in order, and this one
+         *     would otherwise swallow the literal `summary`.
+         */
+        get: operations["event_api_sites__site_id__events__event_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -621,6 +730,32 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AlertOut */
+        AlertOut: {
+            /** Cleared Utc */
+            cleared_utc: string | null;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Last Seen Utc */
+            last_seen_utc: string | null;
+            /** Notified Utc */
+            notified_utc: string | null;
+            /** Notify Count */
+            notify_count: number;
+            /** Notify Error */
+            notify_error: string | null;
+            /** Open */
+            open: boolean;
+            /**
+             * Opened Utc
+             * Format: date-time
+             */
+            opened_utc: string;
+            /** Site Id */
+            site_id: string;
+        };
         /** DeviceConfigOut */
         DeviceConfigOut: {
             /**
@@ -659,6 +794,12 @@ export interface components {
             id: number;
             /** Key */
             key: string;
+            /** Last Push Error */
+            last_push_error?: string | null;
+            /** Last Push Error Utc */
+            last_push_error_utc?: string | null;
+            /** Last Push Utc */
+            last_push_utc?: string | null;
             /** Last Seen */
             last_seen: string | null;
             /** Site Id */
@@ -679,6 +820,12 @@ export interface components {
             device_id: string;
             /** Id */
             id: number;
+            /** Last Push Error */
+            last_push_error?: string | null;
+            /** Last Push Error Utc */
+            last_push_error_utc?: string | null;
+            /** Last Push Utc */
+            last_push_utc?: string | null;
             /** Last Seen */
             last_seen: string | null;
             /** Site Id */
@@ -709,6 +856,13 @@ export interface components {
             }[];
             /** By Hour */
             by_hour: number[];
+            /**
+             * Hourly
+             * @default []
+             */
+            hourly: {
+                [key: string]: unknown;
+            }[];
             /** Total */
             total: number;
         };
@@ -719,6 +873,8 @@ export interface components {
         };
         /** Health */
         Health: {
+            /** Silence Alerts */
+            silence_alerts: string;
             /** Status */
             status: string;
             /** Storage */
@@ -917,6 +1073,38 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_alerts_api_admin_alerts_get: {
+        parameters: {
+            query?: {
+                open_only?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_devices_api_admin_devices_get: {
         parameters: {
             query?: never;
@@ -1055,6 +1243,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DeviceConfigOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_device_status_api_admin_devices__device_pk__status_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_pk: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1659,6 +1876,39 @@ export interface operations {
             };
         };
     };
+    site_alerts_api_sites__site_id__alerts_get: {
+        parameters: {
+            query?: {
+                open_only?: boolean;
+            };
+            header?: never;
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     clip_api_sites__site_id__clips__path__get: {
         parameters: {
             query?: never;
@@ -1738,6 +1988,7 @@ export interface operations {
                 event_type?: string | null;
                 min_score?: number;
                 include_suppressed?: boolean;
+                hourly?: boolean;
             };
             header?: never;
             path: {
@@ -1754,6 +2005,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventsSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    event_api_sites__site_id__events__event_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: string;
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

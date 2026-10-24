@@ -74,6 +74,8 @@ export default function PowerChart({ doc }: { doc: Record<string, any> }) {
     <>
       <div className="chart-box">
         <Line
+          role="img"
+          aria-label={`Historial de energía: ${history.length} lecturas, ${gaps} interrupciones en el reporte, ${nulls} lecturas sin valor.`}
           data={{
             datasets: datasets.map((d) => ({
               label: d.label,

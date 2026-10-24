@@ -8,7 +8,17 @@
  * There is no version prefix and no configurable base URL: nginx proxies /api/
  * to the backend on the same origin, in development and in production alike.
  * See docs/API-CONTRACT.md and docs/SERVER-INFRASTRUCTURE.md.
+ *
+ * Types come from `generated.ts` (openapi-typescript over docs/openapi.json,
+ * `make types`) wherever the backend composes the envelope — that is R-9.5, and
+ * until 2026-10-24 the generated file was regenerated faithfully and imported by
+ * nothing (review FE-04). The device's own documents (events, status, rollups)
+ * are deliberate pass-throughs with no response model, so they stay hand-typed
+ * here from DATA-CONTRACT.md; every number in them may be null.
  */
+import type { components } from "./generated";
+
+type Schemas = components["schemas"];
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -37,7 +47,14 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, message);
   }
   if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  // Guard every parse. A captive portal or a proxy error page can answer 200
+  // with HTML; before this it surfaced as "sin conexión", blaming the network
+  // for a server that did answer (review FE-08, repo rule "guard every JSON.parse").
+  try {
+    return await res.json() as T;
+  } catch {
+    throw new ApiError(res.status, "respuesta del servidor no válida (no es JSON)");
+  }
 }
 
 const json = (body: unknown): RequestInit => ({
@@ -45,13 +62,15 @@ const json = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-// ── contract types. mirror docs/DATA-CONTRACT.md. every number may be null ──
+// ── device documents: hand-typed from DATA-CONTRACT.md, pass-throughs ───────
 
 export type EventType = "vessel" | "blast" | "unknown";
 
+/** `_sites.json` / the site registry. Coordinates are nullable: an unsurveyed
+ *  site is honest, 0,0 is not. */
 export interface Site {
-  id: string; name: string; lat: number; lon: number;
-  device: string; active: boolean;
+  id: string; name: string; lat: number | null; lon: number | null;
+  device: string | null; active: boolean;
 }
 
 export interface Clip {
@@ -68,49 +87,37 @@ export interface DetectionEvent {
   _unknown_schema?: boolean;
 }
 
+// ── backend envelopes: from the generated schema ───────────────────────────
 
-export interface Page<T> {
-  items: T[]; total: number; limit: number; offset: number;
-  has_more: boolean;
-  /**
-   * Cuándo el índice recibió algo por última vez para este sitio (D-021).
-   * Reemplaza a `scanned_blobs`, que describía un trabajo que esta consulta ya
-   * no hace. `null` significa que nunca se indexó nada — despliegue nuevo, o el
-   * indexador no ha corrido. Se muestra, porque "sin detecciones" y "sin datos
-   * llegando" se ven igual y significan lo contrario.
-   */
-  index_updated_utc: string | null;
-}
+export type Page<T> = Omit<Schemas["EventsPage"], "items"> & { items: T[] };
 
-/** Counts over the whole filtered window, not a page of it — backs the
- *  Detecciones charts, which must answer for the period asked, not for
+export interface HourBucket { ts: string; count: number }
+
+/** Counts over the whole filtered window, not a page of it — backs every chart
+ *  and the uptime grid, which must answer for the period asked, not for
  *  whichever page of events happened to be loaded. */
-export interface EventsSummary {
+export type EventsSummary = Omit<Schemas["EventsSummary"], "by_day" | "hourly"> & {
   by_day: { date: string; count: number }[];
-  by_hour: number[];
-  total: number;
-}
+  /** Only when requested with `hourly: true`. One bucket per UTC clock hour. */
+  hourly: HourBucket[];
+};
 
-export interface Me { email: string; role: "operator" | "admin"; sites: string[]; }
-
-export interface AdminUser {
-  id: number; email: string; role: "operator" | "admin";
-  active: boolean; sites: string[];
-}
+export type Me = Schemas["Me"];
+export type AdminUser = Schemas["UserOut"];
+export type AdminDevice = Schemas["DeviceOut"];
+/** `key` exists in the creation response only, never readable again (D-017). */
+export type AdminDeviceCreated = Schemas["DeviceCreated"];
+/** An outage `silence.py` recorded (R-7.5). `open` = not yet cleared. */
+export type DeviceAlert = Schemas["AlertOut"];
+export type IndexDay = Schemas["IndexDayOut"];
+export type IndexSite = Schemas["IndexSiteOut"];
+export type ReconcileResult = Schemas["ReconcileOut"];
+export type Health = Schemas["Health"];
 
 /** Where the site registry came from. "storage" means it is still the
  *  `_sites.json` fallback and nobody has managed it yet. */
 export type SitesSource = "database" | "storage" | "empty";
-
-export interface AdminSites { sites: Site[]; source: SitesSource; }
-
-export interface AdminDevice {
-  id: number; device_id: string; site_id: string;
-  active: boolean; last_seen: string | null;
-}
-
-/** `key` exists in the creation response only, never readable again (D-017). */
-export interface AdminDeviceCreated extends AdminDevice { key: string; }
+export type AdminSites = { sites: Site[]; source: SitesSource };
 
 /** Mirrors the clamp table in DATA-CONTRACT.md "Device configuration" (R-6.2). */
 export interface DeviceConfig {
@@ -120,27 +127,14 @@ export interface DeviceConfig {
   cooldown_s: number; heartbeat_interval_s: number; window_hop_s: number;
 }
 
-export interface DeviceConfigState {
-  device_id: string; site_id: string;
-  version: number;
-  /** What the device compares. Opaque string; changes on every tune. */
-  config_version: string;
-  is_default: boolean;
-  updated_utc: string | null;
-  config: DeviceConfig;
-  clamp_notes: string[];
-  /** Blob path the signed document was written to. Transport is storage (D-020). */
-  published_to: string | null;
-  /** Set when the site holds other devices and this publish replaced their document. */
-  publish_warning: string | null;
-}
+export type DeviceConfigState = Omit<Schemas["DeviceConfigOut"], "config"> & { config: DeviceConfig };
 
 // ── calls ───────────────────────────────────────────────────────────────────
 
 export const auth = {
   login: (email: string, password: string) =>
-    req<{ ok: true }>("/auth/login", { method: "POST", ...json({ email, password }) }),
-  logout: () => req<{ ok: true }>("/auth/logout", { method: "POST" }),
+    req<Schemas["Ok"]>("/auth/login", { method: "POST", ...json({ email, password }) }),
+  logout: () => req<Schemas["Ok"]>("/auth/logout", { method: "POST" }),
   me: () => req<Me>("/auth/me"),
 };
 
@@ -161,6 +155,8 @@ function filterParams(q: EventQuery): URLSearchParams {
   return p;
 }
 
+const seg = encodeURIComponent;
+
 export const data = {
   sites: () => req<{ sites: Site[] }>("/sites"),
 
@@ -168,46 +164,38 @@ export const data = {
     const p = filterParams(q);
     p.set("limit", String(q.limit ?? 50));
     p.set("offset", String(q.offset ?? 0));
-    return req<Page<DetectionEvent>>(`/sites/${siteId}/events?${p}`);
+    return req<Page<DetectionEvent>>(`/sites/${seg(siteId)}/events?${p}`);
   },
+
+  /** One event by id — the `?play=` lookup (R-8.5). 404 when the index does
+   *  not hold it, which is a real answer, not a scan that ran out of page. */
+  event: (siteId: string, eventId: string) =>
+    req<DetectionEvent>(`/sites/${seg(siteId)}/events/${seg(eventId)}`),
 
   /** Counts for the whole filtered period — never a page of it (see
-   *  `EventsSummary`). Backs the Detecciones timeline and hour-of-day charts. */
-  eventsSummary(siteId: string, q: EventQuery = {}) {
+   *  `EventsSummary`). `hourly` adds one bucket per clock hour. */
+  eventsSummary(siteId: string, q: EventQuery = {}, opts: { hourly?: boolean } = {}) {
     const p = filterParams(q);
-    return req<EventsSummary>(`/sites/${siteId}/events/summary?${p}`);
+    if (opts.hourly) p.set("hourly", "true");
+    return req<EventsSummary>(`/sites/${seg(siteId)}/events/summary?${p}`);
   },
 
-  status: (s: string) => req<Record<string, unknown>>(`/sites/${s}/status`),
-  power: (s: string) => req<Record<string, unknown>>(`/sites/${s}/power`),
-  acoustic: (s: string) => req<Record<string, unknown>>(`/sites/${s}/acoustic`),
-  ocean: (s: string) => req<Record<string, unknown>>(`/sites/${s}/ocean`),
+  status: (s: string) => req<Record<string, unknown>>(`/sites/${seg(s)}/status`),
+  /** Open device-silence alerts for this site — the outages the backend noticed
+   *  while nobody had the page open. */
+  alerts: (s: string) => req<{ alerts: DeviceAlert[] }>(`/sites/${seg(s)}/alerts`),
+  power: (s: string) => req<Record<string, unknown>>(`/sites/${seg(s)}/power`),
+  acoustic: (s: string) => req<Record<string, unknown>>(`/sites/${seg(s)}/acoustic`),
+  ocean: (s: string) => req<Record<string, unknown>>(`/sites/${seg(s)}/ocean`),
 
-  /** Audio is proxied by the API, so no storage credential ever reaches here. */
-  clipUrl: (siteId: string, clipPath: string) =>
-    `/api/sites/${siteId}/clips/${clipPath.split("/clips/")[1] ?? ""}`,
+  /** Audio is proxied by the API, so no storage credential ever reaches here.
+   *  Accepts the full `clip.path` (`sites/{site}/clips/YYYY/MM/DD/{id}.wav`) or
+   *  the part after `clips/`; each segment is encoded. */
+  clipUrl: (siteId: string, clipPath: string) => {
+    const rel = clipPath.includes("/clips/") ? clipPath.split("/clips/")[1]! : clipPath;
+    return `/api/sites/${seg(siteId)}/clips/${rel.split("/").map(seg).join("/")}`;
+  },
 };
-
-/** Deriva del índice frente al almacenamiento, por sitio y por día (R-12.5). */
-export interface IndexDay {
-  day: string; blobs_in_storage: number; indexed: number; drift: number;
-}
-
-export interface IndexSite {
-  site_id: string; window_days: number; since: string; until: string;
-  blobs_in_storage: number; indexed: number; drift: number;
-  days_with_drift: IndexDay[];
-  /** `null` = la pasada nunca corrió. Deriva cero sin haber verificado nunca no es evidencia de nada. */
-  last_run_utc: string | null;
-  last_run_ok: boolean | null;
-  last_run_error: string | null;
-  last_run_trigger: string | null;
-}
-
-export interface ReconcileResult {
-  site_id: string; newly_indexed: number; conflicting: number;
-  rejected: number; drift: number; ok: boolean; error: string | null;
-}
 
 export const admin = {
   users: () => req<AdminUser[]>("/admin/users"),
@@ -222,13 +210,13 @@ export const admin = {
                     device?: string | null; active?: boolean }) =>
     req<Site>("/admin/sites", { method: "POST", ...json(b) }),
   updateSite: (id: string, b: Partial<Omit<Site, "id">>) =>
-    req<Site>(`/admin/sites/${id}`, { method: "PUT", ...json(b) }),
-  deleteSite: (id: string) => req<void>(`/admin/sites/${id}`, { method: "DELETE" }),
+    req<Site>(`/admin/sites/${seg(id)}`, { method: "PUT", ...json(b) }),
+  deleteSite: (id: string) => req<void>(`/admin/sites/${seg(id)}`, { method: "DELETE" }),
   importSites: () => req<AdminSites>("/admin/sites/import", { method: "POST" }),
 
   index: () => req<IndexSite[]>("/admin/index"),
   reconcile: (siteId?: string) =>
-    req<ReconcileResult[]>(`/admin/index/reconcile${siteId ? `?site_id=${encodeURIComponent(siteId)}` : ""}`,
+    req<ReconcileResult[]>(`/admin/index/reconcile${siteId ? `?site_id=${seg(siteId)}` : ""}`,
       { method: "POST" }),
   rebuildIndex: (siteId: string) =>
     req<ReconcileResult>("/admin/index/rebuild",
@@ -238,6 +226,12 @@ export const admin = {
   createDevice: (b: { device_id: string; site_id: string }) =>
     req<AdminDeviceCreated>("/admin/devices", { method: "POST", ...json(b) }),
   deleteDevice: (id: number) => req<void>(`/admin/devices/${id}`, { method: "DELETE" }),
+  /** Forget the device's current heartbeat reading (history kept). For a unit
+   *  whose clock ran ahead and left a reading no correct heartbeat can beat. */
+  resetDeviceStatus: (id: number) => req<void>(`/admin/devices/${id}/status`, { method: "DELETE" }),
+
+  alerts: (openOnly = true) =>
+    req<DeviceAlert[]>(`/admin/alerts?open_only=${openOnly ? "true" : "false"}`),
 
   getDeviceConfig: (id: number) => req<DeviceConfigState>(`/admin/devices/${id}/config`),
   setDeviceConfig: (id: number, config: DeviceConfig) =>

@@ -10,12 +10,18 @@
  * Nada aquí interpreta los cruces. Que los clics suban con la energía del mar
  * puede ser biología o puede ser ruido de fondo; eso es ciencia del cliente
  * (D-015). El panel dibuja, no concluye.
+ *
+ * Las detecciones llegan como cuentas por hora (`/events/summary?hourly=true`),
+ * no como una página de 500 eventos: la página se cortaba en silencio al
+ * volumen real y la línea de 30 días quedaba corta por el lado viejo (review
+ * FE-03, 2026-10-24). Cruzar por hora es exactamente lo que ya se hacía — el
+ * estado de mar es horario — así que nada se pierde en la agregación.
  */
 import { useMemo } from "react";
 import { Bar, Line, Scatter } from "react-chartjs-2";
 
 import { useResource } from "@/hooks/useResource";
-import { data, type DetectionEvent, type Page } from "@/api/client";
+import { data, type EventsSummary } from "@/api/client";
 import {
   COLORS, baseOptions, catScale, lineStyle, scatterOptions, timeScale, valueScale,
 } from "@/lib/charts";
@@ -25,8 +31,8 @@ type Doc = Record<string, any>;
 const WINDOW_DAYS = 30;
 
 /** Panel de un gráfico cruzado: dice qué fuente falta en vez de salir vacío. */
-function CrossPanel({ title, note, missing, children }: {
-  title: string; note?: string; missing: string[]; children: React.ReactNode;
+function CrossPanel({ title, note, missing, loading, children }: {
+  title: string; note?: string; missing: string[]; loading: boolean; children: React.ReactNode;
 }) {
   return (
     <section className="panel">
@@ -40,25 +46,28 @@ function CrossPanel({ title, note, missing, children }: {
           correlación vacío se leería como “no hay relación”, y eso sería una
           conclusión inventada.
         </div>
+      ) : loading ? (
+        <div className="loading">Cargando…</div>
       ) : children}
     </section>
   );
 }
 
 export default function Analysis({ siteId }: { siteId: string }) {
-  const since = useMemo(() => new Date(Date.now() - WINDOW_DAYS * 86_400_000), []);
-
-  // Tres fuentes independientes: si una cae, sólo caen los gráficos que la usan.
-  const events = useResource<Page<DetectionEvent>>(
-    () => data.events(siteId, { since, limit: 500 }), [siteId], { pollMs: 300_000 });
+  // La ventana se calcula en cada consulta: un `since` fijado al montar se
+  // alejaba del presente mientras el sondeo seguía (review FE-05j).
+  const summary = useResource<EventsSummary>(
+    () => data.eventsSummary(siteId, { since: new Date(Date.now() - WINDOW_DAYS * 86_400_000) },
+                             { hourly: true }),
+    [siteId], { pollMs: 300_000 });
   const ocean = useResource<Doc>(() => data.ocean(siteId), [siteId], { pollMs: 900_000 });
   const acoustic = useResource<Doc>(() => data.acoustic(siteId), [siteId], { pollMs: 300_000 });
 
-  const evItems = events.data?.items ?? [];
+  const hourlyEvents = summary.data?.hourly ?? [];
   const hourly: Doc[] = Array.isArray(ocean.data?.hourly) ? ocean.data!.hourly : [];
   const timeline: Doc[] = Array.isArray(acoustic.data?.timeline) ? acoustic.data!.timeline : [];
 
-  /** Índice horario del mar, para pegarle a cada evento su estado de mar. */
+  /** Índice horario del mar, para pegarle a cada hora su estado de mar. */
   const seaByHour = useMemo(() => {
     const m = new Map<string, Doc>();
     for (const h of hourly) {
@@ -68,19 +77,14 @@ export default function Analysis({ siteId }: { siteId: string }) {
     return m;
   }, [hourly]);
 
-  const byDay = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const ev of evItems) {
-      const d = new Date(ev.captured_utc);
-      if (isNaN(d.getTime())) continue;
-      const k = d.toISOString().slice(0, 10);
-      m.set(k, (m.get(k) ?? 0) + 1);
-    }
-    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
-      .map(([ts, n]) => ({ x: new Date(ts + "T00:00:00Z").getTime(), y: n }));
-  }, [evItems]);
+  const byDay = useMemo(
+    () => (summary.data?.by_day ?? []).map(({ date, count }) => ({
+      x: new Date(date + "T00:00:00Z").getTime(), y: count,
+    })),
+    [summary.data],
+  );
 
-  /** Eventos agrupados por energía del mar en el momento de la captura. */
+  /** Detecciones agrupadas por energía del mar en su hora de captura. */
   const bySea = useMemo(() => {
     const buckets = [
       { label: "0–10", min: 0, max: 10 },
@@ -90,16 +94,17 @@ export default function Analysis({ siteId }: { siteId: string }) {
     ];
     const counts = buckets.map(() => 0);
     let unknown = 0;
-    for (const ev of evItems) {
-      const d = new Date(ev.captured_utc);
+    for (const b of hourlyEvents) {
+      if (b.count === 0) continue;
+      const d = new Date(b.ts);
       const sea = isNaN(d.getTime()) ? null : seaByHour.get(d.toISOString().slice(0, 13));
       const e = sea ? seaEnergy(sea.swell_m, sea.swell_period_s) : null;
-      if (e == null) { unknown++; continue; }
-      const i = buckets.findIndex((b) => e >= b.min && e < b.max);
-      if (i >= 0) counts[i]!++;
+      if (e == null) { unknown += b.count; continue; }
+      const i = buckets.findIndex((k) => e >= k.min && e < k.max);
+      if (i >= 0) counts[i]! += b.count;
     }
-    return { labels: buckets.map((b) => b.label), counts, unknown };
-  }, [evItems, seaByHour]);
+    return { labels: buckets.map((k) => k.label), counts, unknown };
+  }, [hourlyEvents, seaByHour]);
 
   /** NDSI contra tasa de clics, punto por ventana. */
   const ndsiClick = useMemo(() =>
@@ -123,23 +128,26 @@ export default function Analysis({ siteId }: { siteId: string }) {
     return out;
   }, [timeline, seaByHour]);
 
-  const missEvents = events.failed ? ["las detecciones"] : [];
+  const missEvents = summary.failed ? ["las detecciones"] : [];
   const missOcean = ocean.failed ? ["las condiciones del mar"] : [];
   const missAcoustic = acoustic.failed ? ["los indicadores acústicos"] : [];
+  const total = summary.data?.total ?? 0;
 
   return (
     <>
       <p className="panel-note">
-        Ventana de {WINDOW_DAYS} días, hasta 500 detecciones. Los cruces se hacen
-        por hora: cada evento toma el estado de mar de la hora en que fue
-        capturado. Las horas sin dato de mar se cuentan aparte, nunca como cero.
+        Ventana de {WINDOW_DAYS} días{summary.data ? `, ${total} detecciones` : ""}. Los
+        cruces se hacen por hora: cada detección toma el estado de mar de la hora
+        en que fue capturada. Las horas sin dato de mar se cuentan aparte, nunca
+        como cero.
       </p>
 
       <CrossPanel title="Línea de tiempo integrada"
                   note="detecciones por día"
-                  missing={missEvents}>
+                  missing={missEvents} loading={summary.loading}>
         <div className="chart-box">
           <Line
+            role="img" aria-label={`Detecciones por día en los últimos ${WINDOW_DAYS} días: ${total} en total.`}
             data={{ datasets: [{ label: "Detecciones", data: byDay,
                     ...lineStyle(COLORS.brand, { fill: true,
                       backgroundColor: "rgba(100,177,197,.18)" }) }] }}
@@ -150,9 +158,12 @@ export default function Analysis({ siteId }: { siteId: string }) {
 
       <CrossPanel title="Alertas por estado de mar"
                   note="energía del mar (swell²·período)"
-                  missing={[...missEvents, ...missOcean]}>
+                  missing={[...missEvents, ...missOcean]}
+                  loading={summary.loading || ocean.loading}>
         <div className="chart-box short">
           <Bar
+            role="img"
+            aria-label={`Detecciones por tramo de energía del mar: ${bySea.labels.map((l, i) => `${l}: ${bySea.counts[i]}`).join(", ")}.`}
             data={{
               labels: bySea.labels,
               datasets: [{ label: "Detecciones", data: bySea.counts,
@@ -172,9 +183,10 @@ export default function Analysis({ siteId }: { siteId: string }) {
 
       <CrossPanel title="NDSI vs tasa de clics"
                   note={`${ndsiClick.length} ventanas`}
-                  missing={missAcoustic}>
+                  missing={missAcoustic} loading={acoustic.loading}>
         <div className="chart-box">
           <Scatter
+            role="img" aria-label={`Dispersión NDSI contra tasa de clics, ${ndsiClick.length} ventanas acústicas.`}
             data={{ datasets: [{ label: "Ventana acústica", data: ndsiClick,
                     backgroundColor: COLORS.brand, pointRadius: 3 }] }}
             options={scatterOptions("NDSI", "clics (Hz)")}
@@ -184,9 +196,11 @@ export default function Analysis({ siteId }: { siteId: string }) {
 
       <CrossPanel title="Click de camarón vs energía del mar"
                   note={`${clickEnergy.length} ventanas cruzadas`}
-                  missing={[...missAcoustic, ...missOcean]}>
+                  missing={[...missAcoustic, ...missOcean]}
+                  loading={acoustic.loading || ocean.loading}>
         <div className="chart-box">
           <Scatter
+            role="img" aria-label={`Dispersión tasa de clics contra energía del mar, ${clickEnergy.length} ventanas cruzadas.`}
             data={{ datasets: [{ label: "Ventana acústica", data: clickEnergy,
                     backgroundColor: COLORS.amber, pointRadius: 3 }] }}
             options={scatterOptions("energía del mar", "clics (Hz)")}

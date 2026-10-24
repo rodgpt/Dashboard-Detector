@@ -45,15 +45,16 @@ def current_device(x_device_key: str = Header(...), x_device_id: str = Header(..
 
 @router.get("/config")
 def device_config(device: Device = Depends(current_device)):
-    """**Read-only debugging view of the configuration blob** (D-020).
+    """**The configuration blob, byte for byte** (D-020).
 
-    This is not the delivery path. The device reads
-    `sites/{site_id}/remote_config.json` from storage, which the backend writes
-    when configuration is tuned. This route exists so an operator can see what a
-    unit will receive without opening a storage browser, and it returns the blob
-    **byte for byte** — reading it here and reading it from storage must never
-    produce two different documents, because that is how a signature mismatch
-    hides.
+    Two consumers. A unit with storage configured reads
+    `sites/{site_id}/remote_config.json` from storage itself and uses this route
+    only as a debugging view. A **push-only** unit (no Azure, no local output
+    directory — the QUICKGUIDE provisioning path) has no blob to read and polls
+    this route every `CONFIG_CHECK_INTERVAL` instead (device F-34, 2026-10-24).
+    Either way it returns the stored document **byte for byte** — reading it
+    here and reading it from storage must never produce two different
+    documents, because that is how a signature mismatch hides.
 
     It deliberately does not compose a document of its own. If the blob is
     absent, that is the honest answer: nothing has been published for this site.
@@ -168,11 +169,23 @@ def heartbeat(payload: dict = Body(...),
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "last_seen must carry a UTC offset")
     reported_dt = as_utc(reported_dt)
 
+    now = datetime.now(timezone.utc)
+    # A Pi has no RTC. One that boots with its clock a year ahead (NTP not yet
+    # reached) and heartbeats once would leave a reading no correct heartbeat
+    # could ever beat, freezing this device's status forever; and because the
+    # silence check read the device's own timestamp, `quiet_for` went negative
+    # and the unit could die without ever being flagged (review BE-02,
+    # 2026-10-24). So a timestamp more than `heartbeat_max_future_s` ahead of
+    # the server is rejected — the device logs the body and its heartbeat fail
+    # streak degrades it, which is the honest outcome for a wrong clock.
+    skew = (reported_dt - now).total_seconds()
+    if skew > settings().heartbeat_max_future_s:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"last_seen is {skew:.0f} s in the future — device clock is wrong")
+
     existing = db.get(DeviceStatus, device.id)
     if existing and reported_dt <= as_utc(existing.reported_last_seen):
         return {"accepted": False, "reason": "stale — not newer than the stored reading"}
-
-    now = datetime.now(timezone.utc)
     if existing:
         existing.reported_last_seen = reported_dt
         existing.received_utc = now

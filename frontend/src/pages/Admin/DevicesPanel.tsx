@@ -1,7 +1,24 @@
-import { useState, type FormEvent } from "react";
+import { Fragment, useState, type FormEvent } from "react";
 import { admin, type AdminDevice, type Site } from "@/api/client";
 import { messageFor } from "@/pages/Admin";
 import DeviceConfigEditor from "@/pages/Admin/DeviceConfigEditor";
+import { formatDateTime, timeAgo } from "@/lib/time";
+
+/**
+ * Push health in words (D-022). The contract promises a refused push is visible
+ * here, next to last contact — a unit whose every POST is rejected otherwise
+ * looks identical to a quiet one. An error newer than the last success means
+ * the push path is broken right now.
+ */
+function pushHealth(d: AdminDevice): { text: string; bad: boolean } {
+  const ok = d.last_push_utc ? new Date(d.last_push_utc).getTime() : 0;
+  const err = d.last_push_error_utc ? new Date(d.last_push_error_utc).getTime() : 0;
+  if (!ok && !err) return { text: "sin envíos todavía", bad: false };
+  if (err > ok) {
+    return { text: `rechazado ${timeAgo(d.last_push_error_utc!)}: ${d.last_push_error ?? "sin detalle"}`, bad: true };
+  }
+  return { text: `último envío ${timeAgo(d.last_push_utc!)}`, bad: false };
+}
 
 interface Props {
   sites: Site[];
@@ -62,6 +79,17 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
     }
   }
 
+  async function resetStatus(d: AdminDevice) {
+    if (!confirm(`¿Olvidar la última lectura de estado de ${d.device_id}? Se usa cuando el reloj `
+      + `del equipo se adelantó y ninguna lectura correcta logra reemplazarla. El historial se conserva.`)) return;
+    try {
+      await admin.resetDeviceStatus(d.id);
+      setFeedback({ kind: "ok", text: `Lectura de estado de ${d.device_id} olvidada. El próximo heartbeat la repone.` });
+    } catch (err) {
+      onError(messageFor(err, "No se pudo reiniciar el estado del dispositivo."));
+    }
+  }
+
   return (
     <section className="panel">
       <h2>Dispositivos</h2>
@@ -117,39 +145,47 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
           <thead>
             <tr>
               <th scope="col">Equipo</th><th scope="col">Sitio</th>
-              <th scope="col">Última conexión</th><th scope="col">Acciones</th>
+              <th scope="col">Última conexión</th><th scope="col">Envío de eventos</th>
+              <th scope="col">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {devices.length === 0 && (
-              <tr><td colSpan={4} className="loading">Sin dispositivos registrados.</td></tr>
+              <tr><td colSpan={5} className="loading">Sin dispositivos registrados.</td></tr>
             )}
-            {devices.map((d) => (
-              <>
-                <tr key={d.id}>
+            {devices.map((d) => {
+              const push = pushHealth(d);
+              return (
+              <Fragment key={d.id}>
+                <tr>
                   <td>{d.device_id}</td>
                   <td><span className="chip">{siteName(d.site_id)}</span></td>
-                  <td>{d.last_seen
-                    ? new Date(d.last_seen).toLocaleString("es-CL")
-                    : "nunca se ha conectado"}</td>
+                  <td>{d.last_seen ? formatDateTime(d.last_seen) : "nunca se ha conectado"}</td>
+                  <td className={push.bad ? "push-bad" : undefined} role={push.bad ? "alert" : undefined}>
+                    {push.text}
+                  </td>
                   <td className="actions">
                     <button type="button" className="btn btn-ghost btn-sm"
                             onClick={() => setConfiguring(configuring === d.id ? null : d.id)}>
                       {configuring === d.id ? "Cerrar" : "Configurar"}
                     </button>
+                    <button type="button" className="btn btn-ghost btn-sm"
+                            title="Olvidar la última lectura de estado (reloj adelantado)"
+                            onClick={() => void resetStatus(d)}>Reiniciar estado</button>
                     <button type="button" className="btn btn-danger btn-sm"
                             onClick={() => void remove(d)}>Eliminar</button>
                   </td>
                 </tr>
                 {configuring === d.id && (
-                  <tr key={`${d.id}-cfg`}>
-                    <td colSpan={4}>
+                  <tr>
+                    <td colSpan={5}>
                       <DeviceConfigEditor deviceId={d.id} onClose={() => setConfiguring(null)} />
                     </td>
                   </tr>
                 )}
-              </>
-            ))}
+              </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

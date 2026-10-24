@@ -16,28 +16,34 @@ import StatGrid, { type Stat } from "@/components/StatGrid";
 import HealthBadge from "@/components/HealthBadge";
 import PowerChart from "@/components/PowerChart";
 import UptimeGrid from "@/components/UptimeGrid";
-import { useResource } from "@/hooks/useResource";
-import { data, type DetectionEvent, type Page } from "@/api/client";
+import { useResource, type Resource } from "@/hooks/useResource";
+import { data, type EventsSummary } from "@/api/client";
 import { formatDateTime, timeAgo } from "@/lib/time";
 
 type Doc = Record<string, any>;
+const UPTIME_HOURS = 72;
 
 /** Campos de `health` que esta versión entiende. El resto se muestra igual. */
 const KNOWN_HEALTH = new Set([
-  "detector_ok", "audio_ok", "duty_cycle_pct", "clips_dropped",
-  "upload_backlog", "alerts_enabled", "degraded_reason",
+  "detector_ok", "audio_ok", "capture_ok", "duty_cycle_pct", "last_clip_age_s",
+  "clips_dropped", "upload_backlog", "alerts_enabled", "degraded_reason",
 ]);
 
 const bool = (v: unknown) =>
   v == null ? null : v ? "sí" : "no";
 
-export default function SensorStatus({ siteId }: { siteId: string }) {
-  const status = useResource<Doc>(() => data.status(siteId), [siteId], { pollMs: 60_000 });
+/**
+ * `status` llega del armazón (Dashboard.tsx), que ya lo pide cada minuto para el
+ * badge: antes esta vista lo volvía a pedir por su cuenta y los dos podían
+ * discrepar hasta un minuto (review FE-05e).
+ */
+export default function SensorStatus({ siteId, status }: { siteId: string; status: Resource<Doc> }) {
   // Fuente aparte: si el historial de energía falla, el estado sigue visible (R-7.3).
   const powerHistory = useResource<Doc>(() => data.power(siteId), [siteId], { pollMs: 300_000 });
-  // Para el historial de actividad: las últimas 72 h de eventos, fuente aparte.
-  const recent = useResource<Page<DetectionEvent>>(
-    () => data.events(siteId, { since: new Date(Date.now() - 72 * 3_600_000), limit: 500 }),
+  // Historial de actividad: cuentas por hora del backend, sin tope de página.
+  const recent = useResource<EventsSummary>(
+    () => data.eventsSummary(siteId, { since: new Date(Date.now() - UPTIME_HOURS * 3_600_000) },
+                             { hourly: true }),
     [siteId], { pollMs: 300_000 });
 
   return (
@@ -81,6 +87,13 @@ export default function SensorStatus({ siteId }: { siteId: string }) {
               { label: "Detector operativo", value: bool(health.detector_ok),
                 absent: "el equipo no publica estado del detector" },
               { label: "Audio con señal", value: bool(health.audio_ok) },
+              // F-29 (equipo, 2026-10-24): un stream muerto antes se veía como
+              // 100 % de ciclo de trabajo. capture_ok dice si siguen llegando
+              // ventanas de audio; last_clip_age_s cuánto hace de la última.
+              { label: "Captura viva", value: bool(health.capture_ok),
+                absent: "el equipo no publica estado de captura (versión anterior)" },
+              { label: "Última ventana de audio hace", value: health.last_clip_age_s, unit: " s", digits: 0,
+                warn: (v) => v > 60, absent: "sin dato" },
               { label: "Ciclo de trabajo", value: health.duty_cycle_pct, unit: "%", digits: 1,
                 warn: (v) => v < 90,
                 absent: "aún no hay ventana medida" },
@@ -164,7 +177,8 @@ export default function SensorStatus({ siteId }: { siteId: string }) {
               { label: "Disco libre", value: system.disk_free_gb, unit: " GB", digits: 1 },
               { label: "RAM usada", value: system.ram_used_pct, unit: "%", digits: 1,
                 warn: (v) => v > 90 },
-              { label: "Encendido desde", value: doc.session_start ? formatDateTime(doc.session_start) : null },
+              { label: "Encendido desde", value: doc.session_start ? formatDateTime(doc.session_start) : null,
+                absent: "el equipo no publica session_start" },
               { label: "Tiempo en marcha", value: doc.uptime_seconds != null
                   ? `${Math.floor(doc.uptime_seconds / 86400)} d ${Math.floor((doc.uptime_seconds % 86400) / 3600)} h`
                   : null },
@@ -177,11 +191,12 @@ export default function SensorStatus({ siteId }: { siteId: string }) {
     <Panel
       title="Historial de actividad del sensor"
       resource={recent}
-      emptyMessage="No hay detecciones publicadas para este sitio en las últimas 72 horas."
+      emptyMessage="No se pudieron contar las detecciones de las últimas 72 horas."
     >
-      {(page) => (
+      {(summary) => (
         <UptimeGrid
-          events={page.items.map((e) => e.captured_utc)}
+          hourly={summary.hourly}
+          hours={UPTIME_HOURS}
           sessionStart={status.data?.session_start as string | undefined}
         />
       )}

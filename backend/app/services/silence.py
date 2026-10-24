@@ -106,13 +106,21 @@ def threshold_seconds(db: Session, site_id: str) -> float:
                _heartbeat_s(db, site_id) * s.silence_after_missed_heartbeats)
 
 
-def _last_seen_blob(storage: Storage, site_id: str) -> Optional[datetime]:
+def _last_seen_blob(storage: Storage, site_id: str,
+                    now: Optional[datetime] = None) -> Optional[datetime]:
     """`status.json → last_seen`, or `generated_utc` if that is absent.
 
     Returns None when the blob is missing or unparseable. That is reported as
     `unknown` rather than as silence: "we cannot tell" and "the device is dead"
     are different, and announcing the second when we mean the first is how an
     alerting system trains people to ignore it.
+
+    The value is the *device's* clock, and a Pi has no RTC. A blob stamped in
+    the future would make `quiet_for` negative and the unit un-alertable for as
+    long as its skew (review BE-02, 2026-10-24), so the reading is clamped to
+    `now`: "it wrote something, and the latest that could have been is now".
+    The heartbeat path below does better because it has the server's receive
+    time; the blob path has only this.
     """
     try:
         doc = json.loads(storage.get(STATUS_BLOB.format(site_id=site_id)))
@@ -122,27 +130,37 @@ def _last_seen_blob(storage: Storage, site_id: str) -> Optional[datetime]:
         value = doc.get(field)
         if isinstance(value, str) and value:
             try:
-                parsed = datetime.fromisoformat(value)
+                parsed = as_utc(datetime.fromisoformat(value))
             except ValueError:
                 continue
-            return as_utc(parsed)
+            if now is not None and parsed > now:
+                return now
+            return parsed
     return None
 
 
 def _last_seen_heartbeat(db: Session, site_id: str) -> Optional[datetime]:
-    """`DeviceStatus.reported_last_seen` — POSTed every heartbeat, unconditional
-    on storage (`DATA-CONTRACT.md`, **Device heartbeat**). Added 2026-09-23: a
-    unit with no Azure/local storage configured previously had no liveness
-    signal at all, which meant it could never be checked for silence — the
-    exact failure this whole module exists to catch."""
+    """When the backend last *received* a heartbeat from this site's device
+    (`DeviceStatus.received_utc`), POSTed every heartbeat, unconditional on
+    storage (`DATA-CONTRACT.md`, **Device heartbeat**). Added 2026-09-23: a unit
+    with no Azure/local storage configured previously had no liveness signal at
+    all, which meant it could never be checked for silence — the exact failure
+    this whole module exists to catch.
+
+    Server time, not `reported_last_seen`. Silence is "how long since we heard
+    from it", and only our clock answers that; the device's clock answers "what
+    time did it think it was", which is the wrong question for a device whose
+    clock may be the thing that is broken (review BE-02, 2026-10-24).
+    """
     device = db.exec(select(Device).where(Device.site_id == site_id)).first()
     if not device:
         return None
     row = db.get(DeviceStatus, device.id)
-    return as_utc(row.reported_last_seen) if row else None
+    return as_utc(row.received_utc) if row else None
 
 
-def _last_seen(db: Session, storage: Storage, site_id: str) -> Optional[datetime]:
+def _last_seen(db: Session, storage: Storage, site_id: str,
+               now: Optional[datetime] = None) -> Optional[datetime]:
     """The freshest of two independent signals, neither able to starve the
     other: `status.json` in blob storage (original design; absent on a unit
     with no storage configured) and `DeviceStatus` in Postgres (POSTed every
@@ -150,7 +168,7 @@ def _last_seen(db: Session, storage: Storage, site_id: str) -> Optional[datetime
     which is the normal case for a bench unit — is fully covered by that one;
     this only has to choose when both exist.
     """
-    blob = _last_seen_blob(storage, site_id)
+    blob = _last_seen_blob(storage, site_id, now)
     hb = _last_seen_heartbeat(db, site_id)
     if blob is None:
         return hb
@@ -209,7 +227,7 @@ def check_site(db: Session, storage: Storage, site_id: str, *,
         .where(DeviceAlert.cleared_utc == None)                 # noqa: E711
     ).first()
 
-    last_seen = _last_seen(db, storage, site_id)
+    last_seen = _last_seen(db, storage, site_id, now)
     if last_seen is None:
         # Neither signal usable — see `_last_seen`. Not treated as silence.
         return SilenceCheck(site_id, UNKNOWN,

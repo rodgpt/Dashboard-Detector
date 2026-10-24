@@ -1,15 +1,39 @@
-/** Fecha y hora en español de Chile, y "hace cuánto" para la frescura de datos. */
+/**
+ * Fecha y hora **del sitio**, y "hace cuánto" para la frescura de datos.
+ *
+ * Todo lo que llega del equipo es UTC con desfase explícito. Lo que se muestra
+ * es la hora del sitio, no la del navegador: un revisor en otro país tiene que
+ * leer la misma hora que quien está en la costa, y el contrato dice que las
+ * horas del ciclo diel son locales. Las dos unidades están en Chile, así que la
+ * zona es una constante por ahora; si un sitio sale del país, pasa a venir del
+ * registro de sitios (review FE-05a, 2026-10-24). Cada fecha lleva la
+ * abreviatura de zona para que nadie tenga que adivinarla.
+ */
+
+export const SITE_TZ = "America/Santiago";
+export const SITE_TZ_LABEL = "hora de Chile";
+
+const DATE_TIME = new Intl.DateTimeFormat("es-CL", {
+  timeZone: SITE_TZ, dateStyle: "short", timeStyle: "short", timeZoneName: "short",
+});
+const HOUR = new Intl.DateTimeFormat("en-US", { timeZone: SITE_TZ, hour: "2-digit", hour12: false });
+
+function toDate(value: string | Date): Date {
+  return typeof value === "string" ? new Date(value) : value;
+}
 
 export function formatDateTime(value: string | Date | null | undefined): string {
   if (value == null) return "—";
-  const d = typeof value === "string" ? new Date(value) : value;
-  return isNaN(d.getTime()) ? String(value) : d.toLocaleString("es-CL");
+  const d = toDate(value);
+  return isNaN(d.getTime()) ? String(value) : DATE_TIME.format(d);
 }
 
-export function formatTime(value: string | Date | null | undefined): string {
-  if (value == null) return "—";
-  const d = typeof value === "string" ? new Date(value) : value;
-  return isNaN(d.getTime()) ? String(value) : d.toLocaleTimeString("es-CL");
+/** Hora del día (0–23) en la zona del sitio. Para agrupar por hora local. */
+export function hourInSiteTz(value: string | Date): number | null {
+  const d = toDate(value);
+  if (isNaN(d.getTime())) return null;
+  const part = HOUR.formatToParts(d).find((p) => p.type === "hour")?.value ?? "0";
+  return Number(part) % 24;                 // "24" aparece en algunos motores para medianoche
 }
 
 /**
@@ -19,7 +43,7 @@ export function formatTime(value: string | Date | null | undefined): string {
  */
 export function timeAgo(value: Date | string | null | undefined, now = new Date()): string {
   if (value == null) return "nunca";
-  const d = typeof value === "string" ? new Date(value) : value;
+  const d = toDate(value);
   if (isNaN(d.getTime())) return "—";
 
   const secs = Math.floor((now.getTime() - d.getTime()) / 1000);
@@ -39,6 +63,6 @@ export const STALE_AFTER_MS = 3 * 60 * 1000;
 
 export function isStale(value: Date | string | null | undefined, now = new Date()): boolean {
   if (value == null) return true;
-  const d = typeof value === "string" ? new Date(value) : value;
+  const d = toDate(value);
   return isNaN(d.getTime()) || now.getTime() - d.getTime() > STALE_AFTER_MS;
 }

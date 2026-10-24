@@ -13,12 +13,22 @@ import "leaflet/dist/leaflet.css";
 import type { Site } from "@/api/client";
 import type { HealthState } from "@/components/HealthBadge";
 
-const COLOR: Record<HealthState, string> = {
+/** "unqueried": el panel sólo consulta el estado del sitio seleccionado. Un
+ *  sitio sin consultar no es un equipo que "no publica estado" (eso es
+ *  `unknown`); pintarlos igual mezclaba dos cosas distintas (review FE-05i). */
+type MapState = HealthState | "unqueried";
+
+const COLOR: Record<MapState, string> = {
   ok: "#22c55e", degraded: "#f59e0b", offline: "#ef4444", unknown: "#9fbcc8",
+  unqueried: "#5b7f8e",
 };
-const LABEL: Record<HealthState, string> = {
-  ok: "operativo", degraded: "degradado", offline: "sin contacto", unknown: "estado desconocido",
+const LABEL: Record<MapState, string> = {
+  ok: "operativo", degraded: "degradado", offline: "sin contacto",
+  unknown: "el equipo no publica estado", unqueried: "sin consultar — selecciónalo para ver su estado",
 };
+
+type Located = Site & { lat: number; lon: number };
+const isLocated = (s: Site): s is Located => s.lat != null && s.lon != null;
 
 /** Precisión reducida a propósito: ~11 m, suficiente para un mapa. */
 const coarse = (n: number) => +n.toFixed(4);
@@ -26,11 +36,10 @@ const coarse = (n: number) => +n.toFixed(4);
 /** Zoom máximo deliberado. Acercarse más no aporta y sí expone. */
 const MAX_ZOOM = 12;
 
-function FitSites({ sites }: { sites: Site[] }) {
+function FitSites({ sites }: { sites: Located[] }) {
   const map = useMap();
   useEffect(() => {
-    const pts = sites.filter((s) => s.lat != null && s.lon != null)
-                     .map((s) => [coarse(s.lat), coarse(s.lon)] as [number, number]);
+    const pts = sites.map((s) => [coarse(s.lat), coarse(s.lon)] as [number, number]);
     if (pts.length === 1) map.setView(pts[0]!, 9);
     else if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: MAX_ZOOM });
   }, [sites, map]);
@@ -39,12 +48,12 @@ function FitSites({ sites }: { sites: Site[] }) {
 
 export default function SiteMap({ sites, health, selected, onSelect }: {
   sites: Site[];
-  /** Estado por site_id. Los sitios sin entrada salen como "desconocido". */
+  /** Estado por site_id. Los sitios sin entrada salen como "sin consultar". */
   health: Record<string, HealthState>;
   selected: string | null;
   onSelect: (siteId: string) => void;
 }) {
-  const located = sites.filter((s) => s.lat != null && s.lon != null);
+  const located = sites.filter(isLocated);
 
   if (located.length === 0) {
     return (
@@ -68,7 +77,7 @@ export default function SiteMap({ sites, health, selected, onSelect }: {
           />
           <FitSites sites={located} />
           {located.map((s) => {
-            const state = health[s.id] ?? "unknown";
+            const state: MapState = health[s.id] ?? "unqueried";
             return (
               <CircleMarker
                 key={s.id}

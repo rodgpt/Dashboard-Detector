@@ -12,5 +12,8 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # unreadable and serves as 403, which looks like a routing bug and is not one.
 RUN chmod -R a+rX /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Not under conf.d: a file there is auto-included at http level, and these
+# headers are meant to be included per location (see the snippet's header).
+COPY security-headers.conf /etc/nginx/snippets/security-headers.conf
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

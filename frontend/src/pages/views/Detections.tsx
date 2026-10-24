@@ -25,14 +25,10 @@ import Panel from "@/components/Panel";
 import { COLORS, baseOptions, catScale, lineStyle, timeScale, valueScale } from "@/lib/charts";
 import { useResource } from "@/hooks/useResource";
 import { data, type DetectionEvent, type EventsSummary, type EventType, type Page } from "@/api/client";
-import { formatDateTime, timeAgo } from "@/lib/time";
+import { TYPE_LABEL, TYPE_MARK } from "@/lib/labels";
+import { SITE_TZ_LABEL, formatDateTime, hourInSiteTz, timeAgo } from "@/lib/time";
 
 const PAGE = 50;
-
-const TYPE_LABEL: Record<EventType, string> = {
-  vessel: "embarcación", blast: "detonación", unknown: "desconocido",
-};
-const TYPE_MARK: Record<EventType, string> = { vessel: "▬", blast: "✦", unknown: "?" };
 
 /** null is absence, 0 is a reading. They must not look the same. */
 const num = (v: number | null | undefined, digits = 2) =>
@@ -57,11 +53,13 @@ export default function Detections({ siteId }: { siteId: string }) {
 
   // Mismos filtros que `events`, sin `limit`/`offset`: los gráficos responden
   // por el periodo pedido, no por la página que esté cargada en la tabla.
+  // `hourly` para poder agrupar por hora LOCAL del sitio: `by_hour` del
+  // backend es UTC y la etiqueta decía "UTC" en un panel que se lee en Chile.
   const summary = useResource<EventsSummary>(
     () => data.eventsSummary(siteId, {
       since, event_type: type || undefined, min_score: minScore || undefined,
       include_suppressed: includeSuppressed,
-    }),
+    }, { hourly: true }),
     [siteId, days, type, includeSuppressed, minScore],
     { pollMs: 60_000 },
   );
@@ -74,7 +72,14 @@ export default function Detections({ siteId }: { siteId: string }) {
     })),
     [summary.data],
   );
-  const byHour = summary.data?.by_hour ?? Array.from({ length: 24 }, () => 0);
+  const byHour = useMemo(() => {
+    const out = Array.from({ length: 24 }, () => 0);
+    for (const b of summary.data?.hourly ?? []) {
+      const h = hourInSiteTz(b.ts);
+      if (h != null) out[h]! += b.count;
+    }
+    return out;
+  }, [summary.data]);
 
   return (
     <>
@@ -136,6 +141,8 @@ export default function Detections({ siteId }: { siteId: string }) {
               </span></div>
             <div className="chart-box short">
               <Line
+                role="img"
+                aria-label={`Detecciones por día en el periodo: ${summary.data.total} en total.`}
                 data={{ datasets: [{ label: "Detecciones por día", data: byDay,
                         ...lineStyle(COLORS.brand, { fill: true,
                           backgroundColor: "rgba(100,177,197,.18)" }) }] }}
@@ -146,9 +153,11 @@ export default function Detections({ siteId }: { siteId: string }) {
 
           <section className="panel">
             <div className="panel-head"><h2>Alertas por hora del día</h2>
-              <span className="panel-meta panel-count">UTC</span></div>
+              <span className="panel-meta panel-count">{SITE_TZ_LABEL}</span></div>
             <div className="chart-box short">
               <Bar
+                role="img"
+                aria-label={`Detecciones por hora del día (${SITE_TZ_LABEL}). Hora con más detecciones: ${byHour.indexOf(Math.max(...byHour))}:00.`}
                 data={{
                   labels: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}`),
                   datasets: [{ label: "Detecciones", data: byHour,
@@ -175,7 +184,7 @@ export default function Detections({ siteId }: { siteId: string }) {
               reporta sano estando sordo. Por eso `null` se dice en voz alta en
               vez de omitirse.
             */}
-            {events.data.index_updated_utc === null ? (
+            {events.data.index_updated_utc == null ? (
               <span className="panel-scan warn" title="El índice no tiene ningún evento de este sitio">
                 · índice vacío
               </span>

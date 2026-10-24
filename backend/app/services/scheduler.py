@@ -36,7 +36,7 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.database import engine
 from app.core.models import IndexerRun, Site
-from app.services.reconcile import DEFAULT_WINDOW_DAYS, reconcile_site
+from app.services.reconcile import days_to_cover, reconcile_site
 from app.services.sites import registry
 from app.services.storage import get_storage
 
@@ -58,13 +58,27 @@ def _site_ids(db: Session) -> list[str]:
     return [s["id"] for s in items if s.get("id")]
 
 
-def run_once(site_id: str, *, window_days: int = DEFAULT_WINDOW_DAYS,
-             trigger: str = "scheduled") -> IndexerRun:
+def run_once(site_id: str, *, window_days: Optional[int] = None,
+             trigger: str = "scheduled", full: bool = False) -> IndexerRun:
     """Reconcile one site and record the attempt.
 
     Opens its own session deliberately: this runs on a timer with no request
     behind it, and must not borrow a request-scoped session's lifetime.
+
+    `window_days` defaults to `OCEANKIND_RECONCILE_WINDOW_DAYS` — the setting,
+    not the module constant. The manual routes used the constant and the timer
+    used the setting, so raising the window in the environment changed the
+    scheduled pass but not the "run now" button or the drift panel's basis
+    (review BE-03, 2026-10-24).
+
+    `full=True` reaches back to the oldest blob in storage instead: the rebuild
+    path, which drops every row first and must therefore cover everything the
+    container holds, not a fortnight of it (review BE-01).
     """
+    if window_days is None:
+        window_days = settings().reconcile_window_days
+    if full:
+        window_days = days_to_cover(get_storage(), site_id, window_days)
     with Session(engine()) as db:
         run = IndexerRun(site_id=site_id, window_days=window_days, trigger=trigger)
         try:
@@ -87,12 +101,12 @@ def run_once(site_id: str, *, window_days: int = DEFAULT_WINDOW_DAYS,
         return run
 
 
-def run_all(*, window_days: int = DEFAULT_WINDOW_DAYS,
-            trigger: str = "scheduled") -> list[IndexerRun]:
+def run_all(*, window_days: Optional[int] = None,
+            trigger: str = "scheduled", full: bool = False) -> list[IndexerRun]:
     """Reconcile every active site. One site failing never stops the others."""
     with Session(engine()) as db:
         sites = _site_ids(db)
-    return [run_once(s, window_days=window_days, trigger=trigger) for s in sites]
+    return [run_once(s, window_days=window_days, trigger=trigger, full=full) for s in sites]
 
 
 async def _loop(interval_s: float, window_days: int) -> None:

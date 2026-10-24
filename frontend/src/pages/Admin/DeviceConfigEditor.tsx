@@ -63,7 +63,7 @@ export default function DeviceConfigEditor({ deviceId, onClose }: {
       const updated = await admin.setDeviceConfig(deviceId, body as unknown as DeviceConfig);
       adopt(updated);   // el servidor es la verdad, ajustes incluidos
       const parts = [`Guardada y publicada (versión ${updated.config_version}).`];
-      if (updated.clamp_notes.length) {
+      if (updated.clamp_notes?.length) {
         parts.push(`Valores ajustados al rango permitido: ${updated.clamp_notes.join("; ")}`);
       }
       if (updated.publish_warning) parts.push(`Atención: ${updated.publish_warning}`);

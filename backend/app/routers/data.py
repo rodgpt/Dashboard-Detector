@@ -4,6 +4,7 @@ The browser never touches storage and never holds a credential (R-4.2, R-5.5).
 """
 import hashlib
 import json
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -16,7 +17,8 @@ from app.core.database import get_session
 from app.core.models import User, Device, DeviceStatus, as_utc
 from app.core.security import current_user, assert_site_allowed, allowed_sites
 from app.services.storage import get_storage
-from app.services.events import list_events, event_summary, read_json, read_json_with_etag
+from app.services.events import (list_events, event_summary, get_event, read_json,
+                                 read_json_with_etag)
 
 router = APIRouter()
 
@@ -48,6 +50,9 @@ class EventsSummary(BaseModel):
     by_day: list[dict]
     by_hour: list[int]
     total: int
+    # One {ts, count} per UTC clock hour in the window, zero-filled. Only when
+    # `?hourly=true`; empty otherwise (review FE-03, 2026-10-24).
+    hourly: list[dict] = []
 
 
 @router.get("/sites", response_model=SitesOut)
@@ -92,6 +97,7 @@ def events_summary(
     event_type: Optional[str] = Query(None, pattern="^(vessel|blast|unknown)$"),
     min_score: float = Query(0.0, ge=0.0, le=1.0),
     include_suppressed: bool = True,
+    hourly: bool = False,
     user: User = Depends(current_user),
     db: Session = Depends(get_session),
 ):
@@ -99,11 +105,26 @@ def events_summary(
 
     Same filters as `/events`, minus `limit`/`offset` — a chart is a claim
     about the period asked for, not about whichever page happened to be
-    loaded. Backs the Detecciones timeline and hour-of-day charts.
+    loaded. Backs the Detecciones timeline and hour-of-day charts; with
+    `?hourly=true`, also the sensor uptime grid and the Análisis cross-charts.
     """
     assert_site_allowed(site_id, user, db)
     return event_summary(db, site_id, since, until, event_type,
-                         min_score, include_suppressed)
+                         min_score, include_suppressed, hourly=hourly)
+
+
+@router.get("/sites/{site_id}/events/{event_id}")
+def event(site_id: str, event_id: str,
+          user: User = Depends(current_user), db: Session = Depends(get_session)):
+    """One event by id, as the device wrote it (R-8.5). Declared after
+    `/events/summary` on purpose: FastAPI matches routes in order, and this one
+    would otherwise swallow the literal `summary`."""
+    assert_site_allowed(site_id, user, db)
+    doc = get_event(db, site_id, event_id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "event not in the index for this site")
+    return doc
 
 
 def _rollup(site_id: str, name: str, user: User, db: Session,
@@ -215,13 +236,48 @@ def ocean(site_id: str, request: Request, response: Response,
     return _rollup(site_id, "ocean_conditions.json", user, db, request, response)
 
 
+_SITE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{1,62}$")       # same rule as admin.SITE_ID
+_CLIP_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
 @router.get("/sites/{site_id}/clips/{path:path}")
 def clip(site_id: str, path: str, user: User = Depends(current_user),
          db: Session = Depends(get_session)):
-    """Audio proxied through the API, so the container stays private (R-5.4)."""
+    """Audio proxied through the API, so the container stays private (R-5.4).
+
+    `path` is a blob name under `sites/{site}/clips/`: `YYYY/MM/DD/{event_id}.wav`.
+    Each segment is validated before it is joined, and `LocalStorage` resolves
+    and contains the result as well — two independent guards against a URL
+    walking out of the storage tree (review BE-04, 2026-10-24).
+    """
     assert_site_allowed(site_id, user, db)
+    if not _SITE_ID.match(site_id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid site id")
+    segments = path.split("/")
+    if not segments or any(not _CLIP_SEGMENT.match(s) or s in (".", "..") for s in segments):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid clip path")
     blob = f"sites/{site_id}/clips/{path}"
     storage = get_storage()
     if not storage.exists(blob):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "clip not found")
     return Response(storage.get(blob), media_type="audio/wav")
+
+
+@router.get("/sites/{site_id}/alerts")
+def site_alerts(site_id: str, open_only: bool = True,
+                user: User = Depends(current_user), db: Session = Depends(get_session)):
+    """Device alerts for one site (R-7.5): the outages `silence.py` recorded.
+
+    Until 2026-10-24 these rows were written and read by nothing — a dead unit
+    was a WARNING in a container log. This is what lets the dashboard show
+    "este sitio lleva N horas sin reportar" on the page the operator actually
+    opens (review BE-05). Admin-wide listing: `GET /api/admin/alerts`.
+    """
+    from app.core.models import DeviceAlert
+    from app.routers.admin import alert_out
+    assert_site_allowed(site_id, user, db)
+    q = select(DeviceAlert).where(DeviceAlert.site_id == site_id)
+    if open_only:
+        q = q.where(DeviceAlert.cleared_utc == None)              # noqa: E711
+    q = q.order_by(DeviceAlert.opened_utc.desc()).limit(50)      # type: ignore[attr-defined]
+    return {"alerts": [alert_out(a).model_dump(mode="json") for a in db.exec(q)]}

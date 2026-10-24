@@ -1,6 +1,96 @@
 {
  "components": {
   "schemas": {
+   "AlertOut": {
+    "properties": {
+     "cleared_utc": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cleared Utc"
+     },
+     "id": {
+      "title": "Id",
+      "type": "integer"
+     },
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "last_seen_utc": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Seen Utc"
+     },
+     "notified_utc": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notified Utc"
+     },
+     "notify_count": {
+      "title": "Notify Count",
+      "type": "integer"
+     },
+     "notify_error": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notify Error"
+     },
+     "open": {
+      "title": "Open",
+      "type": "boolean"
+     },
+     "opened_utc": {
+      "format": "date-time",
+      "title": "Opened Utc",
+      "type": "string"
+     },
+     "site_id": {
+      "title": "Site Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "site_id",
+     "kind",
+     "opened_utc",
+     "last_seen_utc",
+     "cleared_utc",
+     "notified_utc",
+     "notify_count",
+     "notify_error",
+     "open"
+    ],
+    "title": "AlertOut",
+    "type": "object"
+   },
    "DeviceConfigOut": {
     "properties": {
      "clamp_notes": {
@@ -101,6 +191,41 @@
       "title": "Key",
       "type": "string"
      },
+     "last_push_error": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Push Error"
+     },
+     "last_push_error_utc": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Push Error Utc"
+     },
+     "last_push_utc": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Push Utc"
+     },
      "last_seen": {
       "anyOf": [
        {
@@ -160,6 +285,41 @@
      "id": {
       "title": "Id",
       "type": "integer"
+     },
+     "last_push_error": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Push Error"
+     },
+     "last_push_error_utc": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Push Error Utc"
+     },
+     "last_push_utc": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Push Utc"
      },
      "last_seen": {
       "anyOf": [
@@ -253,6 +413,15 @@
       "title": "By Hour",
       "type": "array"
      },
+     "hourly": {
+      "default": [],
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Hourly",
+      "type": "array"
+     },
      "total": {
       "title": "Total",
       "type": "integer"
@@ -281,6 +450,10 @@
    },
    "Health": {
     "properties": {
+     "silence_alerts": {
+      "title": "Silence Alerts",
+      "type": "string"
+     },
      "status": {
       "title": "Status",
       "type": "string"
@@ -292,7 +465,8 @@
     },
     "required": [
      "status",
-     "storage"
+     "storage",
+     "silence_alerts"
     ],
     "title": "Health",
     "type": "object"
@@ -833,6 +1007,64 @@
  },
  "openapi": "3.1.0",
  "paths": {
+  "/api/admin/alerts": {
+   "get": {
+    "description": "Open device alerts across every site (admin). Newest first. `open_only=false`\nalso returns cleared ones, for the outage history.",
+    "operationId": "list_alerts_api_admin_alerts_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "open_only",
+      "required": false,
+      "schema": {
+       "default": true,
+       "title": "Open Only",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "title": "Limit",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/AlertOut"
+         },
+         "title": "Response List Alerts Api Admin Alerts Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "List Alerts",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
   "/api/admin/devices": {
    "get": {
     "operationId": "list_devices_api_admin_devices_get",
@@ -1028,6 +1260,42 @@
     ]
    }
   },
+  "/api/admin/devices/{device_pk}/status": {
+   "delete": {
+    "description": "Forget the device's *current* heartbeat reading; history is kept.\n\nThe heartbeat route is monotonic on the device's own `last_seen`. A unit\nwhose clock was wrong (a Pi without an RTC booting a year ahead) can leave a\nreading no correct heartbeat will ever beat, and until 2026-10-24 nothing\ncould clear it short of deleting the device. The route now refuses\nfar-future timestamps, so this is the escape hatch for a reading accepted\nbefore that, or for a clock that was merely a few minutes fast.",
+    "operationId": "reset_device_status_api_admin_devices__device_pk__status_delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "device_pk",
+      "required": true,
+      "schema": {
+       "title": "Device Pk",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Reset Device Status",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
   "/api/admin/index": {
    "get": {
     "description": "Drift per site and per day, plus when the pass last ran (R-12.5).\n\nRead-only and cheap: it lists blob *names* and runs one query per site. It\nopens no blob and indexes nothing, which is what makes it safe to call from\na panel that refreshes.\n\nNon-zero drift is a fault, not a statistic. It means events exist in storage\nthat the dashboard will not show \u2014 the same failure as a device reporting\nitself healthy while deaf, and the reason this is a screen rather than a log\nline.",
@@ -1056,7 +1324,7 @@
   },
   "/api/admin/index/rebuild": {
    "post": {
-    "description": "Drop this site's index rows and rebuild them from object storage (R-12.2).\n\n**This is the proof that the index is derived.** If a rebuild cannot\nreproduce it, then something existed only in Postgres and the index had\nquietly become a second source of truth \u2014 the exact thing D-021 rules out.\nWorth running deliberately every so often, not only when something looks\nwrong.\n\nLosing these rows costs a pass, never a detection: object storage is the\nrecord and every row here came from a blob that is still there.",
+    "description": "Drop this site's index rows and rebuild them from object storage (R-12.2).\n\n**This is the proof that the index is derived.** If a rebuild cannot\nreproduce it, then something existed only in Postgres and the index had\nquietly become a second source of truth \u2014 the exact thing D-021 rules out.\nWorth running deliberately every so often, not only when something looks\nwrong.\n\nLosing these rows costs a pass, never a detection: object storage is the\nrecord and every row here came from a blob that is still there.\n\n**The pass that follows covers the whole history, not the trailing window.**\nUntil 2026-10-24 it reconciled only `reconcile_window_days`, so a rebuild on\nany site with more than a fortnight of events quietly threw the rest away \u2014\nand drift read zero afterwards, because drift is measured over the same\nwindow (review BE-01). `scheduler.run_once(full=True)` lists the `events/`\nprefix to find the oldest day and reconciles from there.",
     "operationId": "rebuild_index_api_admin_index_rebuild_post",
     "requestBody": {
      "content": {
@@ -1559,7 +1827,7 @@
   },
   "/api/devices/config": {
    "get": {
-    "description": "**Read-only debugging view of the configuration blob** (D-020).\n\nThis is not the delivery path. The device reads\n`sites/{site_id}/remote_config.json` from storage, which the backend writes\nwhen configuration is tuned. This route exists so an operator can see what a\nunit will receive without opening a storage browser, and it returns the blob\n**byte for byte** \u2014 reading it here and reading it from storage must never\nproduce two different documents, because that is how a signature mismatch\nhides.\n\nIt deliberately does not compose a document of its own. If the blob is\nabsent, that is the honest answer: nothing has been published for this site.",
+    "description": "**The configuration blob, byte for byte** (D-020).\n\nTwo consumers. A unit with storage configured reads\n`sites/{site_id}/remote_config.json` from storage itself and uses this route\nonly as a debugging view. A **push-only** unit (no Azure, no local output\ndirectory \u2014 the QUICKGUIDE provisioning path) has no blob to read and polls\nthis route every `CONFIG_CHECK_INTERVAL` instead (device F-34, 2026-10-24).\nEither way it returns the stored document **byte for byte** \u2014 reading it\nhere and reading it from storage must never produce two different\ndocuments, because that is how a signature mismatch hides.\n\nIt deliberately does not compose a document of its own. If the blob is\nabsent, that is the honest answer: nothing has been published for this site.",
     "operationId": "device_config_api_devices_config_get",
     "parameters": [
      {
@@ -1812,9 +2080,60 @@
     ]
    }
   },
+  "/api/sites/{site_id}/alerts": {
+   "get": {
+    "description": "Device alerts for one site (R-7.5): the outages `silence.py` recorded.\n\nUntil 2026-10-24 these rows were written and read by nothing \u2014 a dead unit\nwas a WARNING in a container log. This is what lets the dashboard show\n\"este sitio lleva N horas sin reportar\" on the page the operator actually\nopens (review BE-05). Admin-wide listing: `GET /api/admin/alerts`.",
+    "operationId": "site_alerts_api_sites__site_id__alerts_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "open_only",
+      "required": false,
+      "schema": {
+       "default": true,
+       "title": "Open Only",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Site Alerts",
+    "tags": [
+     "data"
+    ]
+   }
+  },
   "/api/sites/{site_id}/clips/{path}": {
    "get": {
-    "description": "Audio proxied through the API, so the container stays private (R-5.4).",
+    "description": "Audio proxied through the API, so the container stays private (R-5.4).\n\n`path` is a blob name under `sites/{site}/clips/`: `YYYY/MM/DD/{event_id}.wav`.\nEach segment is validated before it is joined, and `LocalStorage` resolves\nand contains the result as well \u2014 two independent guards against a URL\nwalking out of the storage tree (review BE-04, 2026-10-24).",
     "operationId": "clip_api_sites__site_id__clips__path__get",
     "parameters": [
      {
@@ -2003,7 +2322,7 @@
   },
   "/api/sites/{site_id}/events/summary": {
    "get": {
-    "description": "Counts for the whole filtered window, not a page of it.\n\nSame filters as `/events`, minus `limit`/`offset` \u2014 a chart is a claim\nabout the period asked for, not about whichever page happened to be\nloaded. Backs the Detecciones timeline and hour-of-day charts.",
+    "description": "Counts for the whole filtered window, not a page of it.\n\nSame filters as `/events`, minus `limit`/`offset` \u2014 a chart is a claim\nabout the period asked for, not about whichever page happened to be\nloaded. Backs the Detecciones timeline and hour-of-day charts; with\n`?hourly=true`, also the sensor uptime grid and the An\u00e1lisis cross-charts.",
     "operationId": "events_summary_api_sites__site_id__events_summary_get",
     "parameters": [
      {
@@ -2087,6 +2406,16 @@
        "title": "Include Suppressed",
        "type": "boolean"
       }
+     },
+     {
+      "in": "query",
+      "name": "hourly",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Hourly",
+       "type": "boolean"
+      }
      }
     ],
     "responses": {
@@ -2112,6 +2441,56 @@
      }
     },
     "summary": "Events Summary",
+    "tags": [
+     "data"
+    ]
+   }
+  },
+  "/api/sites/{site_id}/events/{event_id}": {
+   "get": {
+    "description": "One event by id, as the device wrote it (R-8.5). Declared after\n`/events/summary` on purpose: FastAPI matches routes in order, and this one\nwould otherwise swallow the literal `summary`.",
+    "operationId": "event_api_sites__site_id__events__event_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "site_id",
+      "required": true,
+      "schema": {
+       "title": "Site Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "event_id",
+      "required": true,
+      "schema": {
+       "title": "Event Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Event",
     "tags": [
      "data"
     ]

@@ -174,6 +174,44 @@ def event_id_from_name(name: str) -> Optional[str]:
     return candidate
 
 
+def earliest_event_day(storage: Storage, site_id: str) -> Optional[date]:
+    """The oldest day partition holding any event blob for this site, from one
+    listing of the whole `events/` prefix. Names only — nothing is opened.
+
+    Exists for the full rebuild (R-12.2). A rebuild that dropped every row and
+    then reconciled only the trailing window silently truncated the index to a
+    fortnight on any site with more history than that, and drift read zero
+    afterwards because drift is measured over the same window (review BE-01,
+    2026-10-24). The window is for the *scheduled* pass; a rebuild must cover
+    everything the container holds.
+    """
+    prefix = EVENTS_PREFIX.split("{day")[0].format(site_id=site_id)   # sites/{site}/events/
+    earliest: Optional[date] = None
+    for name in storage.list(prefix):
+        rest = name[len(prefix):] if name.startswith(prefix) else name
+        parts = rest.split("/")
+        if len(parts) < 4:
+            continue
+        try:
+            day = date(int(parts[0]), int(parts[1]), int(parts[2]))
+        except ValueError:
+            continue
+        if earliest is None or day < earliest:
+            earliest = day
+    return earliest
+
+
+def days_to_cover(storage: Storage, site_id: str, minimum: int,
+                  now: Optional[datetime] = None) -> int:
+    """Window length that reaches back to the oldest blob in storage, never
+    shorter than `minimum`."""
+    earliest = earliest_event_day(storage, site_id)
+    if earliest is None:
+        return minimum
+    today = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).date()
+    return max(minimum, (today - earliest).days + 1)
+
+
 def _indexed_ids_by_day(db: Session, site_id: str, since: date,
                         until: date) -> dict[date, set[str]]:
     """`event_id`s already indexed, bucketed by the partition they belong to.

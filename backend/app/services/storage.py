@@ -38,25 +38,47 @@ class Storage(ABC):
 
 
 class LocalStorage(Storage):
-    """Development. Reads the fixture tree. No cloud account (R-9.4)."""
+    """Development. Reads the fixture tree. No cloud account (R-9.4).
+
+    Every path is resolved and checked to stay inside `root`. A blob path comes
+    from a URL (`/clips/{path:path}`), and until 2026-10-24 `..` segments walked
+    straight out of the tree: an authenticated operator could read
+    `/proc/self/environ` — session secret, HMAC key, Azure connection string —
+    as `audio/wav` on any `local` deployment, including the bench tunnel (review
+    BE-04). On Azure a `..` is just a blob name, so the check is a no-op there.
+    """
 
     def __init__(self, root: str):
         self.root = Path(root)
 
+    def _resolve(self, path: str) -> Path:
+        root = self.root.resolve()
+        target = (root / path).resolve()
+        if target != root and not target.is_relative_to(root):
+            raise PermissionError(f"blob path escapes the storage root: {path!r}")
+        return target
+
     def list(self, prefix: str):
-        base = self.root / prefix
+        try:
+            base = self._resolve(prefix)
+        except PermissionError:
+            return []
         if not base.exists():
             return []
-        return sorted(str(p.relative_to(self.root)) for p in base.rglob("*") if p.is_file())
+        root = self.root.resolve()
+        return sorted(str(p.relative_to(root)) for p in base.rglob("*") if p.is_file())
 
     def get(self, path: str) -> bytes:
-        return (self.root / path).read_bytes()
+        return self._resolve(path).read_bytes()
 
     def exists(self, path: str) -> bool:
-        return (self.root / path).is_file()
+        try:
+            return self._resolve(path).is_file()
+        except PermissionError:
+            return False
 
     def put(self, path: str, data: bytes, content_type: str = "application/json") -> None:
-        target = self.root / path
+        target = self._resolve(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         # Write-then-rename: a device polling this blob must never read a half
         # written document and fail its signature check over a torn file.

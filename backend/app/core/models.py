@@ -63,7 +63,8 @@ class User(SQLModel, table=True):
     password_hash: str                       # argon2. never reversible (R-2.2)
     role: str = "operator"                   # operator | admin (R-3.2)
     active: bool = True
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime = Field(
+        default_factory=_now, sa_column=Column(_TZ_DATETIME, nullable=False, default=_now))
 
 
 class SiteAccess(SQLModel, table=True):
@@ -92,7 +93,8 @@ class Site(SQLModel, table=True):
     lon: Optional[float] = None
     device: Optional[str] = None
     active: bool = True
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime = Field(
+        default_factory=_now, sa_column=Column(_TZ_DATETIME, nullable=False, default=_now))
 
 
 class Device(SQLModel, table=True):
@@ -102,7 +104,11 @@ class Device(SQLModel, table=True):
     site_id: str = Field(index=True)
     key_hash: str
     active: bool = True
-    last_seen: Optional[datetime] = None
+    # timestamptz since migration c7a1b2d3e4f5 (2026-10-24): as a naive column
+    # Postgres dropped the offset, `DeviceOut.last_seen` serialised without one,
+    # and a browser in Chile read it as local time, three or four hours off.
+    last_seen: Optional[datetime] = Field(
+        default=None, sa_column=Column(_TZ_DATETIME, nullable=True))
 
     # --- event push health (D-022) -------------------------------------------
     # The contract obliges us to surface a rejected push where `last_seen`
@@ -349,4 +355,5 @@ class DeviceConfig(SQLModel, table=True):
     device_id: str = Field(index=True, unique=True)      # Device.device_id
     config_json: str
     version: int = 2                     # 1 is the implicit defaults version
-    updated_utc: datetime = Field(default_factory=_now)
+    updated_utc: datetime = Field(
+        default_factory=_now, sa_column=Column(_TZ_DATETIME, nullable=False, default=_now))

@@ -100,11 +100,16 @@ export function useResource<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, ...deps]);
 
+  // 403 is terminal (header above): a permission you do not have does not come
+  // back by asking every minute, and until 2026-10-24 this kept asking anyway
+  // (review FE-05f). 404 keeps polling on purpose — a rollup blob the producer
+  // has not written yet is expected to appear later.
+  const forbidden = !!error?.isForbidden;
   useEffect(() => {
-    if (!enabled || !pollMs) return;
+    if (!enabled || !pollMs || forbidden) return;
     const id = setInterval(() => { void run(); }, pollMs);
     return () => clearInterval(id);
-  }, [enabled, pollMs, run]);
+  }, [enabled, pollMs, run, forbidden]);
 
   const terminal = !!error && (error.isForbidden || error.status === 404);
 

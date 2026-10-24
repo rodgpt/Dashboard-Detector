@@ -15,14 +15,21 @@
 #    tunnel still works. Set FRONTEND_PORT to something free — see the port
 #    survey in docs/SERVER-INFRASTRUCTURE.md.
 #
-# If cloudflared runs as a container, prefer `docker-compose.tunnel.yml` instead:
-# it joins the same network and needs no published port at all.
+# 3. THE BACKEND RUNS THE IMAGE, NOT THE HOST CHECKOUT. The dev file bind-mounts
+#    backend/app, tests and alembic for a fast edit loop; here those mounts are
+#    reset, so what deploys is what `docker compose build` produced and the
+#    migrations that run at start are the image's (review BE-08, 2026-10-24).
+#    The fixtures mount is also dropped: production storage is Azure.
+#
+# (A `docker-compose.tunnel.yml` for a containerised cloudflared was planned and
+# never written; if it is, it joins this network and needs no published port.)
 
 services:
   backend:
-    # Compose *appends* ports across files, so clearing needs !reset
+    # Compose *appends* ports and volumes across files, so clearing needs !reset
     # (Compose v2.24+). Without it the dev mapping survives the override.
     ports: !reset []
+    volumes: !reset []
 
   frontend:
     # !override replaces the list rather than appending to it. Loopback only:

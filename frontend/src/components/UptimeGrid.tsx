@@ -8,7 +8,13 @@
  * `empty` y `future` son distintos a propósito. Una hora que aún no ha ocurrido
  * no es una hora en la que el equipo estuvo callado, y pintarlas igual
  * convertiría el futuro en una avería.
+ *
+ * Recibe cuentas por hora del backend (`/events/summary?hourly=true`), no una
+ * página de eventos: la página se cortaba en 500 y, al volumen real, las horas
+ * más viejas de las 72 se pintaban como silencio — un equipo escuchando dibujado
+ * como sordo (review FE-03, 2026-10-24).
  */
+import type { HourBucket } from "@/api/client";
 import { formatDateTime } from "@/lib/time";
 
 type CellState = "active" | "session" | "empty" | "future";
@@ -20,9 +26,11 @@ const LABEL: Record<CellState, string> = {
   future: "aún no ocurre",
 };
 
-export default function UptimeGrid({ events, sessionStart, hours = 72 }: {
-  /** `captured_utc` de cada detección conocida. */
-  events: string[];
+const hourKey = (d: Date) => d.toISOString().slice(0, 13);
+
+export default function UptimeGrid({ hourly, sessionStart, hours = 72 }: {
+  /** Cuenta de detecciones por hora UTC, del backend. */
+  hourly: HourBucket[];
   /** `status.session_start`: desde cuándo el proceso actual lleva corriendo. */
   sessionStart?: string | null;
   hours?: number;
@@ -32,17 +40,15 @@ export default function UptimeGrid({ events, sessionStart, hours = 72 }: {
   const session = sessionStart ? new Date(sessionStart) : null;
 
   const perHour = new Map<string, number>();
-  for (const iso of events) {
-    const d = new Date(iso);
+  for (const b of hourly) {
+    const d = new Date(b.ts);
     if (isNaN(d.getTime())) continue;
-    const k = d.toISOString().slice(0, 13);
-    perHour.set(k, (perHour.get(k) ?? 0) + 1);
+    perHour.set(hourKey(d), (perHour.get(hourKey(d)) ?? 0) + b.count);
   }
 
   const cells = Array.from({ length: hours }, (_, i) => {
     const t = new Date(start.getTime() + i * 3_600_000);
-    const key = t.toISOString().slice(0, 13);
-    const count = perHour.get(key) ?? 0;
+    const count = perHour.get(hourKey(t)) ?? 0;
 
     let state: CellState;
     if (t > now) state = "future";

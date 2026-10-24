@@ -21,12 +21,16 @@ Last updated 2026-08-22 (D-019, D-020).
 | Service | Image | Internal | Host (dev) | Exposed publicly |
 |---|---|---|---|---|
 | `db` | `postgres:16-alpine` | 5432 | none | never |
-| `backend` | built from `backend/` | 8000 | `${BACKEND_PORT:-8000}` | never — only through `frontend` |
+| `backend` | built from `backend/` | 8000 | `127.0.0.1:${BACKEND_PORT:-8000}` (loopback only) | never — only through `frontend` |
 | `frontend` | built from `frontend/` | 80 | `${FRONTEND_PORT:-3000}` | yes, this is the app |
 
 `db` publishes no host port. Reach it with `docker compose exec db psql`.
 
 In production only `frontend` is reachable. The backend is an internal service on the compose network; nginx proxies `/api/` to `http://backend:8000`.
+
+**The backend trusts `X-Forwarded-For`** (`entrypoint.sh`, `--forwarded-allow-ips='*'`, since 2026-10-24). nginx is the only thing that ever connects to it, and it forwards the browser's address; without this uvicorn saw nginx's container address for every request and the login throttle — keyed on address + email — collapsed to per-email, so five wrong guesses from anyone locked an account for everyone (review BE-07a). The trust is safe only because nothing else can reach port 8000: in production it is not published, in development it is bound to loopback. Do not publish it on `0.0.0.0` again.
+
+**Production runs the image.** `docker-compose.prod.yml` resets the dev bind mounts (`backend/app`, `tests`, `alembic`, `fixtures`) with `volumes: !reset []`, so what deploys is what `docker compose build` produced. The dev file's mounts are a restart-to-see-changes convenience, not hot reload — uvicorn runs without `--reload`.
 
 ---
 
@@ -83,6 +87,18 @@ Because nginx serves the app and proxies the API under one origin, the session c
 The reconcile timer (`services/scheduler.py`) also lives in the application process. Two replicas means two timers — *harmless*, because `index_event` is idempotent on `event_id` (R-12.3), but duplicated work. It adds no new constraint, since the throttle already pins this to one; it does mean lifting that pin later has to account for both. Moving the throttle counter to Postgres or Redis is not on its own enough.
 
 **The reconcile pass runs in-process, on a timer** (R-12.4, D-022). Deliberately not a platform scheduler: an Azure Container Apps job or an EventBridge rule would be the cloud runtime dependency R-1.1 forbids — the same objection that removed Event Grid. `OCEANKIND_RECONCILE_INTERVAL_HOURS=0` disables it for a deployment driving the pass from outside; it is logged at warning level, because an index with no reconcile is a supported configuration but never an accidental one.
+
+**Device-silence alerts need a transport to reach anyone.** `OCEANKIND_SILENCE_WEBHOOK_URL` is empty in every deployment so far. The alert is still recorded (`device_alert`) and, since 2026-10-24, shown on the dashboard (`GET /api/sites/{site}/alerts`, `GET /api/admin/alerts`) and reported by `/api/health` as `silence_alerts: log-only`; the backend also warns about it once at boot. Until a webhook exists, a unit that dies at 02:00 is discovered by whoever opens the page.
+
+### Recovering a database stamped at a deleted revision
+
+Two Alembic revisions were created as empty "autogenerate produced nothing" verification stubs and then deleted from source: `70a7f8910db4` (2026-09-03, after `9c2ab4e17d05`) and `a66d9ae43682` (2026-09-23, after `b48e6f1a9d02`). Their bytecode survived in `alembic/versions/__pycache__` until 2026-10-24 and shipped in the image, which is how the review found them. If any database ran `alembic upgrade head` while a stub existed, its `alembic_version` holds that id, and every later start fails with `Can't locate revision` and crash-loops under `restart: unless-stopped`. Check each live database once:
+
+```bash
+docker compose exec db psql -U oceankind oceankind -c "select version_num from alembic_version;"
+```
+
+If it prints `70a7f8910db4`: `docker compose run --rm backend alembic stamp 9c2ab4e17d05`. If `a66d9ae43682`: `… alembic stamp b48e6f1a9d02`. Then `make upgrade`. Any other value is a real revision and needs nothing. `backend/.dockerignore` now keeps bytecode out of the image so this cannot recur that way.
 
 ### Tuning the silence alert without drowning in notifications
 

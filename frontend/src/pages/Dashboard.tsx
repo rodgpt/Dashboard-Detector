@@ -4,22 +4,29 @@
  * La salud del sitio vive aquí, arriba de las pestañas, porque un equipo
  * degradado tiene que verse sin abrir nada (R-7.4). Cada pestaña carga su
  * propia fuente y falla sola (R-7.3).
+ *
+ * Las vistas se montan con `key={siteId}`: cambiar de sitio reinicia filtros,
+ * paginación y ventanas. Antes el `offset` de Detecciones sobrevivía al cambio
+ * y pedía la página N del sitio nuevo, que podía estar vacía — un "sin
+ * detecciones" falso (review FE-05d, 2026-10-24).
  */
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import AppHeader from "@/components/AppHeader";
 import SitePicker from "@/components/SitePicker";
 import HealthBadge, { readHealth, type HealthState } from "@/components/HealthBadge";
-import SiteMap from "@/components/SiteMap";
 import { useResource } from "@/hooks/useResource";
-import { data, type Site } from "@/api/client";
-import { timeAgo } from "@/lib/time";
+import { data, type DeviceAlert, type Site } from "@/api/client";
+import { formatDateTime, timeAgo } from "@/lib/time";
 import Detections from "@/pages/views/Detections";
 import SensorStatus from "@/pages/views/SensorStatus";
 import Acoustic from "@/pages/views/Acoustic";
 import Ocean from "@/pages/views/Ocean";
 import Analysis from "@/pages/views/Analysis";
 import ClipDetail from "@/pages/views/ClipDetail";
+
+// Leaflet sólo se descarga cuando hay un mapa que dibujar (review FE-05k).
+const SiteMap = lazy(() => import("@/components/SiteMap"));
 
 const TABS = [
   { path: "detecciones", label: "Detecciones" },
@@ -36,11 +43,19 @@ export default function Dashboard() {
   const list = sites.data?.sites ?? [];
   const siteId = selected ?? list[0]?.id ?? null;
 
-  // Polled so a unit going quiet becomes visible without a reload.
+  // Polled so a unit going quiet becomes visible without a reload. Shared with
+  // the sensor tab (prop), so the badge and the tab cannot disagree.
   const status = useResource<Record<string, unknown>>(
     () => data.status(siteId!), [siteId], { enabled: !!siteId, pollMs: 60_000 });
 
   const health = readHealth(status.data);
+
+  // Outages the backend recorded while nobody was looking (R-7.5). Until
+  // 2026-10-24 these rows existed and no screen read them. A failed fetch here
+  // hides nothing else: it is its own source (R-7.3).
+  const alerts = useResource<{ alerts: DeviceAlert[] }>(
+    () => data.alerts(siteId!), [siteId], { enabled: !!siteId, pollMs: 300_000 });
+  const openAlerts = alerts.data?.alerts.filter((a) => a.open) ?? [];
 
   if (sites.loading) return <Shell><div className="loading">Cargando sitios…</div></Shell>;
 
@@ -100,6 +115,24 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Silencio registrado por el backend: distinto del badge de arriba, que
+          sólo sabe lo que dice el último status. Esto dice desde cuándo, y si
+          alguien fue avisado fuera del panel. */}
+      {openAlerts.map((a) => (
+        <div className="banner error" role="alert" key={a.id}>
+          <span>
+            <strong>Alerta de silencio abierta.</strong>{" "}
+            El equipo no reporta desde {a.last_seen_utc ? formatDateTime(a.last_seen_utc) : "una fecha desconocida"}{" "}
+            (detectado {timeAgo(a.opened_utc)}).{" "}
+            {a.notify_count > 0
+              ? `Aviso enviado ${a.notify_count} ${a.notify_count === 1 ? "vez" : "veces"}.`
+              : a.notify_error
+                ? `El aviso externo falló: ${a.notify_error}.`
+                : "Nadie ha sido avisado fuera de este panel (sin webhook configurado)."}
+          </span>
+        </div>
+      ))}
+
       {/* Informativo, no un fallo: un equipo de banco sin Twilio sigue
           detectando y registrando con normalidad, solo no avisa por WhatsApp.
           Independiente del estado de salud — por eso no se repite el texto
@@ -117,12 +150,16 @@ export default function Dashboard() {
       {/* El mapa vive arriba de las pestañas: es el "de un vistazo" del que
           habla R-7.4 cuando hay más de un sitio. SiteMap decide por sí mismo
           si dibuja el mapa o el aviso de "sin coordenadas" — el panel no debe
-          desaparecer entero solo porque ningún sitio tiene lat/lon. */}
+          desaparecer entero solo porque ningún sitio tiene lat/lon. Sólo el
+          sitio seleccionado tiene estado consultado; los demás se dibujan como
+          "sin consultar", no como "desconocido" (review FE-05i). */}
       <section className="panel">
         <div className="panel-head"><h2>Sitios</h2></div>
-        <SiteMap sites={list}
-                 health={{ [siteId ?? ""]: health.state } as Record<string, HealthState>}
-                 selected={siteId} onSelect={setSelected} />
+        <Suspense fallback={<div className="loading">Cargando mapa…</div>}>
+          <SiteMap sites={list}
+                   health={{ [siteId ?? ""]: health.state } as Record<string, HealthState>}
+                   selected={siteId} onSelect={setSelected} />
+        </Suspense>
       </section>
 
       <nav className="tab-nav">
@@ -135,16 +172,19 @@ export default function Dashboard() {
       </nav>
 
       {/* ?play= es un enlace compartido: se atiende sea cual sea la pestaña (R-8.5). */}
-      {siteId && <ClipDetail siteId={siteId} />}
+      {siteId && <ClipDetail key={siteId} siteId={siteId} />}
 
       {siteId && (
         <Routes>
           <Route index element={<Navigate to="detecciones" replace />} />
-          <Route path="detecciones" element={<Detections siteId={siteId} />} />
-          <Route path="acustica" element={<Acoustic siteId={siteId} />} />
-          <Route path="mar" element={<Ocean siteId={siteId} />} />
-          <Route path="analisis" element={<Analysis siteId={siteId} />} />
-          <Route path="sensor" element={<SensorStatus siteId={siteId} />} />
+          <Route path="detecciones" element={<Detections key={siteId} siteId={siteId} />} />
+          <Route path="acustica" element={<Acoustic key={siteId} siteId={siteId} />} />
+          <Route path="mar" element={<Ocean key={siteId} siteId={siteId} />} />
+          <Route path="analisis" element={<Analysis key={siteId} siteId={siteId} />} />
+          <Route path="sensor" element={<SensorStatus key={siteId} siteId={siteId} status={status} />} />
+          {/* Una ruta desconocida vuelve a la primera pestaña en vez de dejar el
+              armazón con el cuerpo vacío (review FE-08). */}
+          <Route path="*" element={<Navigate to="/detecciones" replace />} />
         </Routes>
       )}
     </Shell>

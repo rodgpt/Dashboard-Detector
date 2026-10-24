@@ -111,6 +111,8 @@ export default function Ocean({ siteId }: { siteId: string }) {
                 </h3>
                 <div className="chart-box">
                   <Line
+                    role="img"
+                    aria-label={`Oleaje y altura de ola: ${observed.length} horas observadas y ${forecast.length} de pronóstico.`}
                     data={{
                       datasets: [
                         { label: "Swell (m)", data: series(observed, "swell_m"),
@@ -133,6 +135,8 @@ export default function Ocean({ siteId }: { siteId: string }) {
                 </h3>
                 <div className="chart-box">
                   <Line
+                    role="img"
+                    aria-label={`Viento y ráfaga: ${observed.length} horas observadas y ${forecast.length} de pronóstico.`}
                     data={{
                       datasets: [
                         { label: "Viento (km/h)", data: series(observed, "wind_kmph"),
@@ -152,6 +156,7 @@ export default function Ocean({ siteId }: { siteId: string }) {
                 <h3 className="section-head">Nubosidad</h3>
                 <div className="chart-box short">
                   <Line
+                    role="img" aria-label="Nubosidad por hora, observada y pronosticada."
                     data={{
                       datasets: [
                         { label: "Nubosidad (%)", data: series(observed, "cloud_pct"),

@@ -119,6 +119,14 @@ class DeviceOut(BaseModel):
     site_id: str
     active: bool
     last_seen: datetime | None
+    # Push health (D-022). The contract (`DATA-CONTRACT.md` §Event upload, "What
+    # this does not change") promises a refused push is visible in the panel next
+    # to `last_seen`. The columns were recorded since 2026-09-03 and exposed by
+    # nothing until the 2026-10-24 review (BE-05): an error stamp newer than the
+    # success stamp means the push path is broken right now.
+    last_push_utc: datetime | None = None
+    last_push_error_utc: datetime | None = None
+    last_push_error: str | None = None
 
 
 class DeviceCreated(DeviceOut):
@@ -273,6 +281,64 @@ def delete_device(device_pk: int, _: User = Depends(require_admin),
     db.exec(delete(DeviceStatusHistory).where(DeviceStatusHistory.device_id == d.id))
     db.exec(delete(DeviceStatus).where(DeviceStatus.device_id == d.id))
     db.delete(d); db.commit()
+
+
+@router.delete("/devices/{device_pk}/status", status_code=204)
+def reset_device_status(device_pk: int, _: User = Depends(require_admin),
+                        db: Session = Depends(get_session)):
+    """Forget the device's *current* heartbeat reading; history is kept.
+
+    The heartbeat route is monotonic on the device's own `last_seen`. A unit
+    whose clock was wrong (a Pi without an RTC booting a year ahead) can leave a
+    reading no correct heartbeat will ever beat, and until 2026-10-24 nothing
+    could clear it short of deleting the device. The route now refuses
+    far-future timestamps, so this is the escape hatch for a reading accepted
+    before that, or for a clock that was merely a few minutes fast.
+    """
+    d = db.get(Device, device_pk)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such device")
+    db.exec(delete(DeviceStatus).where(DeviceStatus.device_id == d.id))
+    db.commit()
+
+
+# ── device alerts (R-7.5) ────────────────────────────────────────────────────
+# `silence.py` records an outage as a `DeviceAlert` row and notifies through a
+# webhook that, in every deployment so far, is not configured — so until the
+# 2026-10-24 review the only trace of a dead unit was a WARNING line in a
+# container log nobody watches. The rows existed; nothing read them.
+
+class AlertOut(BaseModel):
+    id: int
+    site_id: str
+    kind: str
+    opened_utc: datetime
+    last_seen_utc: datetime | None
+    cleared_utc: datetime | None
+    notified_utc: datetime | None
+    notify_count: int
+    notify_error: str | None
+    open: bool
+
+
+def alert_out(a) -> AlertOut:
+    return AlertOut(id=a.id, site_id=a.site_id, kind=a.kind, opened_utc=a.opened_utc,
+                    last_seen_utc=a.last_seen_utc, cleared_utc=a.cleared_utc,
+                    notified_utc=a.notified_utc, notify_count=a.notify_count,
+                    notify_error=a.notify_error, open=a.cleared_utc is None)
+
+
+@router.get("/alerts", response_model=list[AlertOut])
+def list_alerts(open_only: bool = True, limit: int = 50,
+                _: User = Depends(require_admin), db: Session = Depends(get_session)):
+    """Open device alerts across every site (admin). Newest first. `open_only=false`
+    also returns cleared ones, for the outage history."""
+    from app.core.models import DeviceAlert
+    q = select(DeviceAlert)
+    if open_only:
+        q = q.where(DeviceAlert.cleared_utc == None)              # noqa: E711
+    q = q.order_by(col(DeviceAlert.opened_utc).desc()).limit(max(1, min(limit, 500)))
+    return [alert_out(a) for a in db.exec(q)]
 
 
 # ── device configuration tuning (R-6.2, D-015) ───────────────────────────────
@@ -506,6 +572,13 @@ def rebuild_index(body: RebuildIn, _: User = Depends(require_admin),
 
     Losing these rows costs a pass, never a detection: object storage is the
     record and every row here came from a blob that is still there.
+
+    **The pass that follows covers the whole history, not the trailing window.**
+    Until 2026-10-24 it reconciled only `reconcile_window_days`, so a rebuild on
+    any site with more than a fortnight of events quietly threw the rest away —
+    and drift read zero afterwards, because drift is measured over the same
+    window (review BE-01). `scheduler.run_once(full=True)` lists the `events/`
+    prefix to find the oldest day and reconciles from there.
     """
     from app.core.models import DetectionEvent
     from app.services import scheduler
@@ -520,7 +593,7 @@ def rebuild_index(body: RebuildIn, _: User = Depends(require_admin),
         db.delete(row)
     db.commit()
 
-    r = scheduler.run_once(body.site_id, trigger="manual")
+    r = scheduler.run_once(body.site_id, trigger="rebuild", full=True)
     return ReconcileOut(site_id=r.site_id, newly_indexed=r.newly_indexed,
                         conflicting=r.conflicting, rejected=r.rejected,
                         drift=r.drift, ok=r.ok, error=r.error)

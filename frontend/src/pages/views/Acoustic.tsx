@@ -30,6 +30,8 @@ function Spread({ rows, med, q1, q3, label, color, unit }: {
   return (
     <div className="chart-box">
       <Line
+        role="img"
+        aria-label={`${label}: mediana y rango intercuartil sobre ${rows.length} ventanas.`}
         data={{
           datasets: [
             { label: `${label} Q3`, data: pt(q3), borderColor: "transparent",
@@ -103,10 +105,11 @@ export default function Acoustic({ siteId }: { siteId: string }) {
                     doble fabricó. */}
                 <h3 className="section-head">
                   Ciclo diel — NDSI
-                  <span className="section-note">mediana por hora del día, UTC</span>
+                  <span className="section-note">mediana por hora local del día (contrato)</span>
                 </h3>
                 <div className="chart-box short">
                   <Line
+                    role="img" aria-label="Ciclo diel del NDSI: mediana por hora local del día."
                     data={{
                       labels: diel.map((d) => `${String(d.hour).padStart(2, "0")}`),
                       datasets: [{ label: "NDSI", data: diel.map((d) => (d.ndsi_med as number) ?? null),
@@ -118,10 +121,11 @@ export default function Acoustic({ siteId }: { siteId: string }) {
 
                 <h3 className="section-head">
                   Ciclo diel — tasa de clics
-                  <span className="section-note">mediana por hora del día, UTC</span>
+                  <span className="section-note">mediana por hora local del día (contrato)</span>
                 </h3>
                 <div className="chart-box short">
                   <Line
+                    role="img" aria-label="Ciclo diel de la tasa de clics: mediana por hora local del día."
                     data={{
                       labels: diel.map((d) => `${String(d.hour).padStart(2, "0")}`),
                       datasets: [{ label: "Clics", data: diel.map((d) => (d.click_med as number) ?? null),
@@ -132,8 +136,9 @@ export default function Acoustic({ siteId }: { siteId: string }) {
                 </div>
 
                 <p className="chart-note">
-                  La hora es UTC. Si el sitio necesita hora local, es una decisión
-                  pendiente del contrato, no un ajuste de este panel.
+                  La hora del ciclo diel la publica el agregador en hora local del
+                  sitio, según el contrato (<code>diel.hour</code>). Este panel la
+                  muestra tal cual; no la convierte.
                 </p>
               </>
             )}

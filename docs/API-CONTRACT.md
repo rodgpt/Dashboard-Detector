@@ -10,7 +10,7 @@ make openapi          # writes docs/openapi.json
 
 This document is the part a generator cannot produce: why the surface is shaped this way, and what a client is obliged to do with it.
 
-Last updated 2026-08-22. Requirement IDs refer to `../REQUIREMENTS.md`.
+Last updated 2026-10-24 (review Batch B: alerts routes, device push health in `DeviceOut`, status reset, clip-path validation, heartbeat clock-skew rejection, `/api/health.silence_alerts`; Batch C: `GET /events/{event_id}`, `?hourly=true` on the summary, generated types actually consumed). Previous: 2026-09-23 (heartbeat), 2026-08-26 (event push), 2026-08-22. Requirement IDs refer to `../REQUIREMENTS.md`.
 
 ---
 
@@ -25,11 +25,14 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `GET` | `/api/auth/me` | cookie | Who am I, what role, which sites |
 | `GET` | `/api/sites` | cookie | Site registry, **filtered to what the caller may see** |
 | `GET` | `/api/sites/{site}/events` | cookie | Paginated, filtered detections |
+| `GET` | `/api/sites/{site}/events/summary` | cookie | Counts for the whole filtered window: per day, per hour of day, and with `?hourly=true` per clock hour |
+| `GET` | `/api/sites/{site}/events/{event_id}` | cookie | One event by id, as the device wrote it. The `?play=` lookup (R-8.5) |
 | `GET` | `/api/sites/{site}/status` | cookie | `status.json` for that site — freshest of blob storage and the direct heartbeat POST (D-018) |
+| `GET` | `/api/sites/{site}/alerts` | cookie | Device-silence alerts for the site (R-7.5). `?open_only=false` includes cleared ones |
 | `GET` | `/api/sites/{site}/power` | cookie | `power_history.json` |
 | `GET` | `/api/sites/{site}/acoustic` | cookie | `acoustic_indicators.json` |
 | `GET` | `/api/sites/{site}/ocean` | cookie | `ocean_conditions.json` |
-| `GET` | `/api/sites/{site}/clips/{path}` | cookie | Audio, proxied. `audio/wav` |
+| `GET` | `/api/sites/{site}/clips/{path}` | cookie | Audio, proxied. `audio/wav`. `400` on a path segment outside `[A-Za-z0-9._-]` or `..` |
 | `GET` | `/api/admin/users` | cookie, admin | List users with their site assignments |
 | `POST` | `/api/admin/users` | cookie, admin | Create a user |
 | `PUT` | `/api/admin/users/{id}/sites` | cookie, admin | Replace a user's site assignments |
@@ -42,15 +45,17 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `GET` | `/api/admin/index` | cookie, admin | Index drift per site and per day, plus when the pass last ran (R-12.5) |
 | `POST` | `/api/admin/index/reconcile` | cookie, admin | Run the reconcile now. `?site_id=` for one, omitted for all |
 | `POST` | `/api/admin/index/rebuild` | cookie, admin | Drop a site's index rows and rebuild from storage (R-12.2) |
-| `GET` | `/api/admin/devices` | cookie, admin | List devices with last contact time |
+| `GET` | `/api/admin/devices` | cookie, admin | List devices with last contact time and push health (`last_push_utc`, `last_push_error_utc`, `last_push_error`) |
 | `POST` | `/api/admin/devices` | cookie, admin | Register a device. **The key is in this response only** |
 | `DELETE` | `/api/admin/devices/{id}` | cookie, admin | Revoke a device credential |
+| `DELETE` | `/api/admin/devices/{id}/status` | cookie, admin | Forget the device's current heartbeat reading (history kept) — for a clock that ran ahead |
+| `GET` | `/api/admin/alerts` | cookie, admin | Open device-silence alerts across all sites. `?open_only=false` for history |
 | `GET` | `/api/admin/devices/{id}/config` | cookie, admin | Effective (clamped) config, version, default or tuned |
 | `PUT` | `/api/admin/devices/{id}/config` | cookie, admin | Tune. Clamped on write; adjustments reported back |
-| `GET` | `/api/devices/config` | device headers | **Debug view** of the published config blob, byte for byte. Not the delivery path |
+| `GET` | `/api/devices/config` | device headers | The published config blob, byte for byte. Debug view for storage units; **the delivery path for push-only units** (device F-34) |
 | `POST` | `/api/devices/events` | device headers | One detection, pushed. Low-latency path; idempotent on `event_id` (R-6.3, D-022) |
-| `POST` | `/api/devices/heartbeat` | device headers | `status.json`, pushed every heartbeat. No storage dependency; monotonic on `last_seen`, enforced here (D-018) |
-| `GET` | `/api/health` | none | Liveness and which storage backend is wired |
+| `POST` | `/api/devices/heartbeat` | device headers | `status.json`, pushed every heartbeat. No storage dependency; monotonic on `last_seen`, enforced here (D-018); `400` if `last_seen` is more than 300 s ahead of the server |
+| `GET` | `/api/health` | none | Liveness, which storage backend is wired, and whether silence alerts reach anyone (`silence_alerts`: `webhook`, `log-only`, `off`) |
 
 Everything not in that table requires a session. `/api/health` and `/api/auth/login` are the only two exceptions, and neither returns data (R-2.1).
 
@@ -84,7 +89,7 @@ Admin routes return `403` to an operator, never `404`.
 
 | Status | Meaning | What the client does |
 |---|---|---|
-| `400` | Malformed input | Show the message. It is safe to display |
+| `400` | Malformed input — including a clip path that tries to leave `sites/{site}/clips/`, and a heartbeat whose `last_seen` is in the future | Show the message. It is safe to display |
 | `401` | No session, or it expired | Redirect to login. Do not retry |
 | `403` | Authenticated, not permitted | Show a permission message. Do not retry, do not redirect to login |
 | `404` | The resource genuinely is not there, including an absent blob | Render the panel as unavailable, keep the rest of the page |
@@ -173,9 +178,12 @@ Same filter parameters as `/events` (`since`, `until`, `event_type`, `min_score`
 {
   "by_day":  [ { "date": "2026-08-20", "count": 14 }, /* … */ ],
   "by_hour": [ 0, 0, 3, 1, /* … 24 entries, index = UTC hour */ ],
-  "total":   412
+  "total":   412,
+  "hourly":  [ { "ts": "2026-08-20T13:00:00+00:00", "count": 2 }, /* … */ ]   // only with ?hourly=true, else []
 }
 ```
+
+`?hourly=true` (2026-10-24) adds one `{ts, count}` per UTC clock hour in `[since, until]`, zero-filled like `by_day`. It backs the sensor uptime grid (72 h) and the Análisis cross-charts (30 d), which used to fetch a 500-event page and bucket it in the browser — a page the backend caps at 500 newest-first, so at real volume the oldest hours silently dropped and a listening device drew as silent (review FE-03). The frontend buckets `by_hour`-style charts itself from `hourly` in the site's timezone; `by_hour` stays UTC for callers that want it.
 
 Exists because `Detecciones`'s timeline and hour-of-day charts used to bucket whatever page `/events` returned. That is exactly right for the table and exactly wrong for a chart: a 30-day window holding more than one page's worth of events rendered as "the newest 50 events," not 30 days, no matter what the period selector said. This route answers for the whole window every time, at the same cost as `/events` — one indexed read of `captured_utc`, zero blob reads — so a 90-day chart costs what a one-day chart costs.
 
@@ -205,6 +213,8 @@ GET /api/sites/{site}/clips/2026/08/08/{event_id}.wav
 
 Returns `audio/wav`. The path is what `clip.path` carries in the event blob, minus the `sites/{site}/clips/` prefix.
 
+Every segment of `{path}` must match `[A-Za-z0-9._-]+` and may not be `..`; anything else is `400`. `LocalStorage` independently resolves the joined path and refuses one that leaves its root. Until 2026-10-24 neither check existed and `..%2F` walked out of the fixture tree on any `local` deployment (review BE-04).
+
 **The browser never receives a storage credential or a SAS token** (R-4.2). Audio is proxied, so the container stays private (R-5.5).
 
 `?play=` deep links already sitting in people's WhatsApp history resolve through this route (R-8.5).
@@ -217,10 +227,12 @@ Generated, not hand-written (R-9.5):
 
 ```bash
 make openapi                 # docs/openapi.json, straight from the app definition
-make types                   # web/src/generated/api-types.ts, from that schema
+make types                   # frontend/src/api/generated.ts, from that schema
 ```
 
 Both generated files are committed. A reviewer sees the contract move in the diff, and the frontend compiles against the schema rather than against somebody's memory of it.
+
+That sentence was false from 2026-08-22 to 2026-10-24: `generated.ts` was regenerated faithfully and imported by nothing, and `client.ts` hand-typed every envelope (review FE-04). Since 2026-10-24 `client.ts` derives every backend-composed type from `components["schemas"]` — `DeviceOut`, `AlertOut`, `IndexSiteOut`, `EventsPage`, `UserOut`, `Me`, … — so a route change that is not reflected in the frontend fails `tsc`. The device's own documents (events, `status.json`, rollups) are deliberate pass-throughs with no response model and stay hand-typed from `DATA-CONTRACT.md`; that boundary is the one `docs/TODO.md` already records.
 
 **What is typed, and what deliberately is not.**
 
@@ -269,6 +281,8 @@ Same authentication as `/events`. The device posts its `status.json` document ev
 This is the opposite design from `/events` on the one property that matters most: **the device never retries a failed heartbeat.** A stale reading has no recovery value once superseded, and retrying risks delivering a late one after a fresher one already landed. Correctness is therefore enforced here, not by device discipline: the route accepts any `last_seen` (always `202`) but silently ignores one that is not strictly newer than what is already stored for that device — the response carries `{"accepted": false, ...}` in that case, which the device does not read and must not act on.
 
 Two tables, always written together on an accepted heartbeat: `DeviceStatus` (current, upserted — what `GET /api/sites/{site}/status` reads) and `DeviceStatusHistory` (append-only, one row per accepted heartbeat). An ignored heartbeat writes neither.
+
+**The device clock is not trusted for liveness (2026-10-24, review BE-02).** A Pi has no RTC; one that boots a year ahead and heartbeats once would leave a `reported_last_seen` no correct heartbeat could ever beat, freezing its status and — because the silence check used that same timestamp — making `quiet_for` negative, so a dead unit could never be flagged. Two changes: a `last_seen` more than `OCEANKIND_HEARTBEAT_MAX_FUTURE_S` (300 s) ahead of the server is `400`, and `silence.py` measures silence from `DeviceStatus.received_utc` (when *we* heard it), clamping a blob's `last_seen` to now. `DELETE /api/admin/devices/{id}/status` forgets a reading accepted before the check existed.
 
 *Why this exists rather than relying on `/events` plus the blob.* A unit with no storage configured at all previously had no liveness signal whatsoever — not to the dashboard, and not to `silence.py`'s device-silence alerting, which reads `status.json → last_seen` and had nothing to read. This route is what makes liveness independent of the storage decision. `GET /api/sites/{site}/status` and `silence.py` both read whichever of the blob or `DeviceStatus` is fresher, never assuming one exists.
 

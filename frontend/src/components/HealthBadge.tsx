@@ -16,6 +16,7 @@ export type HealthState = "ok" | "degraded" | "unknown" | "offline";
 interface Health {
   detector_ok?: boolean | null;
   audio_ok?: boolean | null;
+  capture_ok?: boolean | null;
   duty_cycle_pct?: number | null;
   degraded_reason?: string | null;
   alerts_enabled?: boolean | null;
@@ -40,6 +41,7 @@ export function readHealth(status: Record<string, unknown> | null): {
   const failing: string[] = [];
   if (health.detector_ok === false) failing.push("detector caído");
   if (health.audio_ok === false) failing.push("audio sin señal");
+  if (health.capture_ok === false) failing.push("captura detenida");
   if (typeof health.duty_cycle_pct === "number" && health.duty_cycle_pct < 90) {
     failing.push(`ciclo de trabajo ${health.duty_cycle_pct.toFixed(1)}%`);
   }

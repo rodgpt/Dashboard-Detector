@@ -152,6 +152,27 @@ def list_events(
     }
 
 
+def get_event(db: Session, site: str, event_id: str) -> Optional[dict]:
+    """One event by its id, from the index — the document exactly as the device
+    wrote it, with the unknown-schema flag added on the way out like `list_events`.
+
+    Exists for `?play=` (R-8.5): the clip page used to scan a 500-event page of
+    the last year to find its event, which silently failed for any clip older
+    than the newest 500 (review FE-03, 2026-10-24). The `event_id` is in the clip
+    filename, so a direct lookup is the honest answer.
+    """
+    row = db.exec(
+        select(DetectionEvent)
+        .where(DetectionEvent.site_id == site, DetectionEvent.event_id == event_id)
+    ).first()
+    if row is None:
+        return None
+    doc = dict(row.document)
+    if doc.get("schema_version") != SCHEMA_VERSION:
+        doc["_unknown_schema"] = True
+    return doc
+
+
 def event_summary(
     db: Session,
     site: str | list[str],
@@ -160,6 +181,7 @@ def event_summary(
     event_type: Optional[str] = None,
     min_score: float = 0.0,
     include_suppressed: bool = True,
+    hourly: bool = False,
 ) -> dict:
     """Per-day and per-hour-of-day counts over the whole filtered window.
 
@@ -189,6 +211,14 @@ def event_summary(
     may not have reported) — the query already covers every day in the
     window, so "no matching events that day" is exactly what a missing key
     would otherwise have hidden.
+
+    `hourly=True` adds `hourly`: one `{ts, count}` per UTC clock hour in the
+    window, zero-filled for the same reason as `by_day`. It is what the sensor
+    uptime grid (72 h) and the Análisis cross-charts (30 d) read since
+    2026-10-24 — both used to fetch a 500-event page and bucket it client-side,
+    which at ~340 events/site/day silently dropped the oldest hours and painted
+    a listening device as silent (review FE-03). Off by default because a 90-day
+    window is 2,160 entries the Detecciones charts have no use for.
     """
     until = _as_utc(until or datetime.now(timezone.utc))
     since = _as_utc(since or (until - timedelta(days=7)))
@@ -218,17 +248,30 @@ def event_summary(
         day += timedelta(days=1)
 
     by_hour = [0] * 24
+    per_hour: dict[datetime, int] = {}
     for value in stamps:
         ts = as_utc(value)
         key = ts.date().isoformat()
         by_day[key] = by_day.get(key, 0) + 1
         by_hour[ts.hour] += 1
+        if hourly:
+            h = ts.replace(minute=0, second=0, microsecond=0)
+            per_hour[h] = per_hour.get(h, 0) + 1
 
-    return {
+    out = {
         "by_day": [{"date": d, "count": n} for d, n in sorted(by_day.items())],
         "by_hour": by_hour,
         "total": len(stamps),
+        "hourly": [],
     }
+    if hourly:
+        h = since.replace(minute=0, second=0, microsecond=0)
+        buckets = []
+        while h <= until:
+            buckets.append({"ts": h.isoformat(), "count": per_hour.get(h, 0)})
+            h += timedelta(hours=1)
+        out["hourly"] = buckets
+    return out
 
 
 def _index_updated(db: Session, sites: list[str]) -> Optional[str]:

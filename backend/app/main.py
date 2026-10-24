@@ -49,6 +49,18 @@ def _configure_logging() -> None:
 async def lifespan(_: FastAPI):
     _configure_logging()
     settings().validate_runtime()      # fail fast and loudly on missing secrets (R-4.3)
+    # Build the storage client once, here, so a backend that cannot be
+    # constructed fails the boot instead of every later request (review BE-07b).
+    from app.services.storage import get_storage
+    get_storage()
+    if not settings().silence_webhook_url:
+        # Not a secret and not optional to know: with no webhook, a device that
+        # dies is a WARNING line in this log and a row in `device_alert` that the
+        # dashboard now shows — but nobody is paged. Say so once, where an
+        # operator reading the boot log will see it (review BE-05).
+        logging.getLogger("app").warning(
+            "OCEANKIND_SILENCE_WEBHOOK_URL is empty: device-silence alerts are recorded "
+            "and shown in the dashboard but nobody is notified out of band")
     init_db()
     # The reconcile pass is the index's correctness mechanism (R-12.4), and one
     # that only runs when somebody remembers to call it is not a mechanism. In
@@ -72,11 +84,17 @@ app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
 class Health(BaseModel):
     status: str
     storage: str
+    # "webhook" when device-silence alerts reach somebody out of band,
+    # "log-only" when they are recorded and shown but nobody is paged (R-7.5).
+    silence_alerts: str
 
 
 @app.get("/api/health", tags=["ops"], response_model=Health)
 def health():
-    return {"status": "ok", "storage": settings().storage_backend}
+    s = settings()
+    return {"status": "ok", "storage": s.storage_backend,
+            "silence_alerts": ("off" if not s.silence_alerts_enabled
+                               else "webhook" if s.silence_webhook_url else "log-only")}
 
 
 # No catch-all route. An unknown path is a 404 from FastAPI, which is correct:
