@@ -82,7 +82,9 @@ def creds(client):
     r = client.post("/api/admin/devices",
                     json={"device_id": "Rpi_push", "site_id": "zapallar"})
     assert r.status_code == 201
-    return {"X-Device-Id": "Rpi_push", "X-Device-Key": r.json()["key"]}
+    # The panel issues ONE secret; the device presents the auth key derived from it (D-020)
+    from app.core.security import derive_keys
+    return {"X-Device-Id": "Rpi_push", "X-Device-Key": derive_keys(r.json()["key"])[0]}
 
 
 @pytest.fixture(autouse=True)

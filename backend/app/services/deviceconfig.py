@@ -4,11 +4,19 @@ The client chooses threshold values; we bound them and sign them (D-015). The
 tables below implement the ones in `DATA-CONTRACT.md` under **Device
 configuration** — change them together or not at all.
 
-**Transport is storage, not HTTP** (D-020). The backend writes
-`sites/{site_id}/remote_config.json`; the device polls it every 300 s and
-applies a document only when `config_version` differs from the one in force.
-`GET /api/devices/config` still exists but is a read-only debugging view and
-must return byte-identical content.
+**Two delivery paths for one document.** The backend writes
+`sites/{site_id}/remote_config.json` (storage units read it) and keeps the exact
+signed bytes on the device's `DeviceConfig` row, which `GET /api/devices/config`
+returns byte for byte (push-only units read that). The device polls every 300 s
+and applies a document only when `config_version` differs from the one in force.
+
+**Signed per device** (Rpi-Detector D-020): the key is the device's own
+`config_key`, derived from the one secret issued at creation — not a global key.
+A site with two devices gets two documents; the blob holds the last one written,
+the rows hold each device's own.
+
+**Carries the release assignment** (Rpi-Detector D-021): `release` and `hold`
+travel inside `config` next to the thresholds, under the same signature.
 """
 import hashlib
 import hmac
@@ -51,6 +59,13 @@ MODES = ("psd", "rms", "auto")
 
 CONFIG_BLOB = "sites/{site_id}/remote_config.json"
 
+# Keys that ride inside `config` but are not thresholds: set through the
+# release routes, never through the tuning form. Stripped if a tune submits them.
+RELEASE_KEYS = ("release", "hold")
+
+import re as _re
+TAG_RE = _re.compile(r"^v?[0-9A-Za-z][0-9A-Za-z._-]{0,63}$")
+
 
 class ConfigError(ValueError):
     """Invalid in a way clamping must not paper over. The message is shown to
@@ -64,6 +79,7 @@ def validate_and_clamp(raw: dict) -> tuple[dict, list[str]]:
     that silently failed to tune anything is the quiet failure this system
     exists to remove. Missing keys take defaults, so a partial tune is safe.
     """
+    raw = {k: v for k, v in raw.items() if k not in RELEASE_KEYS}
     unknown = set(raw) - set(DEFAULTS)
     if unknown:
         raise ConfigError(f"unknown config field(s): {', '.join(sorted(unknown))}")
@@ -112,13 +128,14 @@ def sign(document: dict, key: str) -> str:
 
 
 def build_document(site_id: str, config: dict, config_version: str, key: str,
-                   device_id: str | None = None) -> dict:
-    """The exact document the contract specifies, signed.
+                   device_id: str | None = None, release: str | None = None,
+                   hold: bool = False) -> dict:
+    """The exact document the contract specifies, signed with the device's key.
 
-    `device_id` is optional: `None` means the document applies to every device
-    at the site, which is the common case. There is no `expires_utc` — a
-    configuration stays in force until a different `config_version` verifies.
-    Stale and detecting beats fresh and silent.
+    `device_id` names the one device whose key signed this; since D-020 it is
+    always set. `release`/`hold` (D-021) go inside `config`. There is no
+    `expires_utc` — a configuration stays in force until a different
+    `config_version` verifies. Stale and detecting beats fresh and silent.
     """
     doc = {
         "schema_version": 2,
@@ -126,7 +143,7 @@ def build_document(site_id: str, config: dict, config_version: str, key: str,
         "site": site_id,
         "device_id": device_id,
         "issued_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "config": config,
+        "config": {**config, "release": release, "hold": bool(hold)},
     }
     doc["signature"] = sign(doc, key)
     return doc

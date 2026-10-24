@@ -14,10 +14,10 @@ from app.core.database import get_session
 from app.core.models import (
     User, SiteAccess, Device, DeviceConfig, DeviceStatus, DeviceStatusHistory, Site,
 )
-from app.core.security import require_admin, hash_password
+from app.core.security import require_admin, hash_password, derive_keys
 from app.core.config import settings
 from app.services.storage import get_storage
-from app.services import deviceconfig, sites as sites_service
+from app.services import deviceconfig, releases, sites as sites_service
 
 router = APIRouter()
 
@@ -127,10 +127,41 @@ class DeviceOut(BaseModel):
     last_push_utc: datetime | None = None
     last_push_error_utc: datetime | None = None
     last_push_error: str | None = None
+    # Release state (Rpi-Detector D-021), from the last heartbeat and the
+    # assignment. `installed_sha` ≠ the assigned tag's commit after a rollback
+    # shows as `failed_sha` set; the panel paints it red.
+    software_version: str | None = None
+    installed_sha: str | None = None
+    installed_release: str | None = None
+    failed_sha: str | None = None
+    failed_release: str | None = None
+    assigned_release: str | None = None
+    hold: bool = False
+    # Created before D-020 with the global signing key: can still push and
+    # heartbeat, but no configuration or release can be signed for it until it
+    # is deleted and created again (one new secret to paste on the unit).
+    needs_reprovision: bool = False
 
 
 class DeviceCreated(DeviceOut):
-    key: str            # plaintext, this response only. never stored, never logged
+    key: str            # the ONE device secret, plaintext, this response only. never stored, never logged
+
+
+def _device_out(d: Device, db: Session) -> DeviceOut:
+    cfg = db.exec(select(DeviceConfig).where(DeviceConfig.device_id == d.device_id)).first()
+    st = db.get(DeviceStatus, d.id) if d.id is not None else None
+    payload = (st.payload or {}) if st else {}
+    ota = payload.get("ota") or {}
+    return DeviceOut(
+        id=d.id, device_id=d.device_id, site_id=d.site_id, active=d.active, last_seen=d.last_seen,
+        last_push_utc=d.last_push_utc, last_push_error_utc=d.last_push_error_utc,
+        last_push_error=d.last_push_error,
+        software_version=payload.get("software_version"),
+        installed_sha=ota.get("installed_sha"), installed_release=ota.get("installed_release"),
+        failed_sha=ota.get("failed_sha"), failed_release=ota.get("failed_release"),
+        assigned_release=cfg.release if cfg else None, hold=bool(cfg.hold) if cfg else False,
+        needs_reprovision=d.config_key is None,
+    )
 
 
 def _known_sites(db: Session) -> list[str]:
@@ -241,12 +272,23 @@ def import_sites(_: User = Depends(require_admin), db: Session = Depends(get_ses
 
 @router.get("/devices", response_model=list[DeviceOut])
 def list_devices(_: User = Depends(require_admin), db: Session = Depends(get_session)):
-    return list(db.exec(select(Device)))
+    return [_device_out(d, db) for d in db.exec(select(Device))]
 
 
 @router.post("/devices", response_model=DeviceCreated, status_code=201)
 def create_device(body: DeviceIn, _: User = Depends(require_admin),
                   db: Session = Depends(get_session)):
+    """Issue the device's ONE secret (Rpi-Detector D-020).
+
+    The secret is shown once in this response and never stored. Two keys are
+    derived from it with fixed labels (`security.derive_keys`): the
+    authentication key, kept as an argon2 hash, and the configuration signing
+    key, kept in clear because this side signs. The device derives the same two
+    from the same secret. One paste at provisioning covers both.
+
+    If a fleet default release is set (D-021) the new device is assigned it
+    immediately, so a fresh unit cannot drift unnoticed.
+    """
     if not _DEVICE_ID.match(body.device_id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "device_id must be 3-64 characters: letters, digits, _ or -")
@@ -258,11 +300,21 @@ def create_device(body: DeviceIn, _: User = Depends(require_admin),
     if db.exec(select(Device).where(Device.device_id == body.device_id)).first():
         raise HTTPException(status.HTTP_409_CONFLICT, "that device_id already exists")
 
-    key = secrets.token_urlsafe(32)
-    d = Device(device_id=body.device_id, site_id=body.site_id, key_hash=hash_password(key))
+    secret = secrets.token_urlsafe(32)
+    auth_key, config_key = derive_keys(secret)
+    d = Device(device_id=body.device_id, site_id=body.site_id,
+               key_hash=hash_password(auth_key), config_key=config_key)
     db.add(d); db.commit(); db.refresh(d)
-    return DeviceCreated(id=d.id, device_id=d.device_id, site_id=d.site_id,
-                         active=d.active, last_seen=d.last_seen, key=key)
+
+    default = releases.fleet_default(db)
+    if default:
+        row = DeviceConfig(device_id=d.device_id, config_json=json.dumps(dict(deviceconfig.DEFAULTS)),
+                           release=default, hold=False, updated_utc=datetime.now(timezone.utc))
+        db.add(row); db.commit(); db.refresh(row)
+        _publish(d, row, dict(deviceconfig.DEFAULTS), db)
+
+    out = _device_out(d, db)
+    return DeviceCreated(**out.model_dump(), key=secret)
 
 
 @router.delete("/devices/{device_pk}", status_code=204)
@@ -318,6 +370,7 @@ class AlertOut(BaseModel):
     notified_utc: datetime | None
     notify_count: int
     notify_error: str | None
+    detail: str | None = None     # degraded reason / battery level, when the kind has one
     open: bool
 
 
@@ -325,7 +378,7 @@ def alert_out(a) -> AlertOut:
     return AlertOut(id=a.id, site_id=a.site_id, kind=a.kind, opened_utc=a.opened_utc,
                     last_seen_utc=a.last_seen_utc, cleared_utc=a.cleared_utc,
                     notified_utc=a.notified_utc, notify_count=a.notify_count,
-                    notify_error=a.notify_error, open=a.cleared_utc is None)
+                    notify_error=a.notify_error, detail=a.detail, open=a.cleared_utc is None)
 
 
 @router.get("/alerts", response_model=list[AlertOut])
@@ -357,6 +410,8 @@ class DeviceConfigOut(BaseModel):
     clamp_notes: list[str] = []   # non-empty when a submitted value was bounded
     published_to: str | None = None   # blob path, once written
     publish_warning: str | None = None
+    release: str | None = None    # D-021: assigned release tag, if any
+    hold: bool = False
 
 
 def _get_device(device_pk: int, db: Session) -> Device:
@@ -380,7 +435,39 @@ def _state(d: Device, row: DeviceConfig | None, **extra) -> DeviceConfigOut:
     return DeviceConfigOut(device_id=d.device_id, site_id=d.site_id, version=row.version,
                            config_version=_config_version(row), is_default=False,
                            updated_utc=row.updated_utc, config=json.loads(row.config_json),
-                           **extra)
+                           release=row.release, hold=bool(row.hold), **extra)
+
+
+def _require_config_key(d: Device) -> str:
+    """A device created before D-020 has no per-device signing key. Say so,
+    rather than sign with a key the unit does not hold."""
+    if not d.config_key:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"device '{d.device_id}' was created before per-device keys (D-020) and has no "
+            "signing key. Delete it and create it again, then paste the new secret into "
+            "/etc/oceankind.env on the unit")
+    return d.config_key
+
+
+def _publish(d: Device, row: DeviceConfig, config: dict, db: Session) -> str:
+    """Sign the device's document with ITS key, remember the exact bytes on the
+    row (what GET /api/devices/config returns), and write the site blob."""
+    doc = deviceconfig.build_document(
+        site_id=d.site_id, config=config, config_version=_config_version(row),
+        key=_require_config_key(d), device_id=d.device_id,
+        release=row.release, hold=bool(row.hold))
+    row.signed_json = deviceconfig.serialise(doc).decode()
+    db.add(row); db.commit(); db.refresh(row)
+    return deviceconfig.publish(get_storage(), d.site_id, doc)
+
+
+def _row_for(d: Device, db: Session, create: bool) -> DeviceConfig | None:
+    row = db.exec(select(DeviceConfig).where(DeviceConfig.device_id == d.device_id)).first()
+    if row is None and create:
+        row = DeviceConfig(device_id=d.device_id, config_json=json.dumps(dict(deviceconfig.DEFAULTS)),
+                           updated_utc=datetime.now(timezone.utc))
+    return row
 
 
 @router.get("/devices/{device_pk}/config", response_model=DeviceConfigOut)
@@ -405,42 +492,86 @@ def put_device_config(device_pk: int, body: dict, _: User = Depends(require_admi
     would leave the panel showing a configuration no device will ever apply.
     """
     d = _get_device(device_pk, db)
+    _require_config_key(d)
     try:
         config, notes = deviceconfig.validate_and_clamp(body)
     except deviceconfig.ConfigError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
 
-    key = settings().config_hmac_key
-    if not key:
-        # Refuse the whole operation rather than persist something we cannot
-        # deliver. Never publish unsigned (R-6.2.1).
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
-                            "OCEANKIND_CONFIG_HMAC_KEY is not configured, so this "
-                            "configuration cannot be signed or published")
-
-    row = db.exec(select(DeviceConfig)
-                  .where(DeviceConfig.device_id == d.device_id)).first()
-    if row:
+    row = _row_for(d, db, create=True)
+    if row.id is not None:
         row.version += 1
-        row.config_json = json.dumps(config)
-    else:
-        row = DeviceConfig(device_id=d.device_id, config_json=json.dumps(config))
+    row.config_json = json.dumps(config)
     row.updated_utc = datetime.now(timezone.utc)
     db.add(row); db.commit(); db.refresh(row)
 
     # One blob per site, so a second device at the same site would overwrite
-    # this document. Say so instead of silently clobbering it.
+    # this document in storage (each device's own copy stays on its row and is
+    # what GET /api/devices/config serves). Say so instead of silently clobbering it.
     siblings = [x.device_id for x in db.exec(select(Device).where(
         Device.site_id == d.site_id, Device.device_id != d.device_id))]
     warning = (f"site '{d.site_id}' also has {', '.join(siblings)}; the site has one "
                f"configuration blob and this publish replaced it") if siblings else None
 
-    doc = deviceconfig.build_document(
-        site_id=d.site_id, config=config, config_version=_config_version(row),
-        key=key, device_id=d.device_id)
-    path = deviceconfig.publish(get_storage(), d.site_id, doc)
-
+    path = _publish(d, row, config, db)
     return _state(d, row, clamp_notes=notes, published_to=path, publish_warning=warning)
+
+
+# ── releases (Rpi-Detector D-021) ────────────────────────────────────────────
+# Publish a version, then choose which units take it and when. The assignment
+# travels in the signed configuration the unit already polls; the unit's OTA
+# converges to the assigned tag and never tracks a branch.
+
+class ReleaseAssign(BaseModel):
+    release: Optional[str] = None     # git tag; null = no assignment (unit keeps what it runs)
+    hold: Optional[bool] = None       # true freezes the unit regardless of release
+
+
+class ReleasesOut(BaseModel):
+    tags: list[str]                   # from GitHub, newest first; empty if unreachable
+    fleet_default: Optional[str]
+
+
+class FleetDefaultIn(BaseModel):
+    release: Optional[str]
+
+
+@router.get("/releases", response_model=ReleasesOut)
+def list_releases(_: User = Depends(require_admin), db: Session = Depends(get_session)):
+    return ReleasesOut(tags=releases.github_tags(), fleet_default=releases.fleet_default(db))
+
+
+@router.put("/releases/default", response_model=ReleasesOut)
+def set_fleet_default(body: FleetDefaultIn, _: User = Depends(require_admin),
+                      db: Session = Depends(get_session)):
+    """The release a NEW device is assigned at creation. Does not touch
+    existing assignments — staging is per device, on purpose."""
+    if not releases.valid_tag(body.release):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "release must be a git tag like v2.2.0")
+    releases.set_fleet_default(db, body.release)
+    return ReleasesOut(tags=releases.github_tags(), fleet_default=releases.fleet_default(db))
+
+
+@router.put("/devices/{device_pk}/release", response_model=DeviceConfigOut)
+def assign_release(device_pk: int, body: ReleaseAssign, _: User = Depends(require_admin),
+                   db: Session = Depends(get_session)):
+    """Assign a release and/or set the hold for one device, then re-sign and
+    re-publish its configuration so the unit sees it at its next poll."""
+    d = _get_device(device_pk, db)
+    _require_config_key(d)
+    if "release" in body.model_fields_set and not releases.valid_tag(body.release):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "release must be a git tag like v2.2.0")
+    row = _row_for(d, db, create=True)
+    if "release" in body.model_fields_set:
+        row.release = body.release
+    if body.hold is not None:
+        row.hold = body.hold
+    if row.id is not None:
+        row.version += 1
+    row.updated_utc = datetime.now(timezone.utc)
+    db.add(row); db.commit(); db.refresh(row)
+    path = _publish(d, row, json.loads(row.config_json), db)
+    return _state(d, row, published_to=path)
 
 
 # ── the detection index: drift, reconcile, rebuild (R-12.2, R-12.5) ──────────

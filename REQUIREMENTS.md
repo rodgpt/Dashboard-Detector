@@ -67,7 +67,7 @@ We build the plumbing. The client provides the detection science.
 
 ## R-4 Secrets
 
-**R-4.1 MUST** hold every secret server-side: storage credentials, Twilio, the session signing key, the device config HMAC key (`OCEANKIND_CONFIG_HMAC_KEY`), per-device keys.
+**R-4.1 MUST** hold every secret server-side: storage credentials, Twilio (the system's only copy — devices hold none since Rpi-Detector D-020), the session signing key, and the per-device keys (an argon2 hash of each device's auth key and, in clear, its configuration signing key, both derived from the one secret issued at creation; the shared `OCEANKIND_CONFIG_HMAC_KEY` no longer exists).
 
 **R-4.2 MUST NOT** ever send a secret, a storage credential or a SAS token to the browser.
 
@@ -109,7 +109,7 @@ This requirement used to name its mechanism, reading date-partitioned blob prefi
 
 *Revised 2026-08-22 (D-020).* This was built as `GET /api/devices/config`. The canonical contract specifies blob transport, and the two sides canonicalise different objects, so pointing the device at the endpoint would fail every signature check **silently** — configuration would simply stop applying. The endpoint may remain as a read-only debugging view returning byte-identical content.
 
-**R-6.2.1 MUST** hold the signing key in `OCEANKIND_CONFIG_HMAC_KEY`, and refuse to publish rather than publish unsigned when it is absent.
+**R-6.2.1 MUST** sign each device's configuration with that device's own key (`Device.config_key`, derived from its provisioning secret — Rpi-Detector D-020), and refuse to publish (`409`) rather than publish unsigned when a device has none. *Was: a single `OCEANKIND_CONFIG_HMAC_KEY` for the fleet; replaced 2026-10-24.*
 
 **R-6.3 SHOULD** accept event uploads from devices at `POST /api/devices/events`, authenticated with the per-device credential of R-6.1, so a detection reaches the index in seconds rather than at the next reconcile.
 
@@ -139,7 +139,7 @@ It stays a `SHOULD` deliberately. The push can fail independently of the blob wr
 
 **Notification volume is bounded by construction**, because an alerting system that repeats every five minutes teaches people to ignore it: one `DeviceAlert` row per outage, notified once on opening, repeated only every `SILENCE_RENOTIFY_HOURS` (default 24, `0` to never repeat), and closed with a recovery message when the unit returns. All four knobs live in one block in `core/config.py`.
 
-Transport is a plain webhook — portable by construction (R-1.1), so it works with whatever the client already runs. Empty means log-only, which is the state today: Twilio remains blocked on client console access (F-04). The alert is recorded regardless, and a *failed* notification is recorded on the row, because an alert raised and never delivered is the failure this requirement exists to prevent.
+Transport is the backend's own Twilio sender (`services/alerts.py`, Rpi-Detector D-020, 2026-10-24) — plain REST over `urllib`, no SDK, so it is still portable by construction (R-1.1). Unconfigured means log-only, and `/api/health` says so. The alert is recorded regardless, and a *failed* notification is recorded on the row, because an alert raised and never delivered is the failure this requirement exists to prevent. The same transport now carries the detection, degradation, battery and heartbeat messages the device used to send itself.
 
 ---
 

@@ -15,6 +15,17 @@
       ],
       "title": "Cleared Utc"
      },
+     "detail": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detail"
+     },
      "id": {
       "title": "Id",
       "type": "integer"
@@ -114,6 +125,11 @@
       "title": "Device Id",
       "type": "string"
      },
+     "hold": {
+      "default": false,
+      "title": "Hold",
+      "type": "boolean"
+     },
      "is_default": {
       "title": "Is Default",
       "type": "boolean"
@@ -139,6 +155,17 @@
        }
       ],
       "title": "Published To"
+     },
+     "release": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Release"
      },
      "site_id": {
       "title": "Site Id",
@@ -179,13 +206,73 @@
       "title": "Active",
       "type": "boolean"
      },
+     "assigned_release": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Assigned Release"
+     },
      "device_id": {
       "title": "Device Id",
       "type": "string"
      },
+     "failed_release": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Failed Release"
+     },
+     "failed_sha": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Failed Sha"
+     },
+     "hold": {
+      "default": false,
+      "title": "Hold",
+      "type": "boolean"
+     },
      "id": {
       "title": "Id",
       "type": "integer"
+     },
+     "installed_release": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Installed Release"
+     },
+     "installed_sha": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Installed Sha"
      },
      "key": {
       "title": "Key",
@@ -238,9 +325,25 @@
       ],
       "title": "Last Seen"
      },
+     "needs_reprovision": {
+      "default": false,
+      "title": "Needs Reprovision",
+      "type": "boolean"
+     },
      "site_id": {
       "title": "Site Id",
       "type": "string"
+     },
+     "software_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Software Version"
      }
     },
     "required": [
@@ -278,13 +381,73 @@
       "title": "Active",
       "type": "boolean"
      },
+     "assigned_release": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Assigned Release"
+     },
      "device_id": {
       "title": "Device Id",
       "type": "string"
      },
+     "failed_release": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Failed Release"
+     },
+     "failed_sha": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Failed Sha"
+     },
+     "hold": {
+      "default": false,
+      "title": "Hold",
+      "type": "boolean"
+     },
      "id": {
       "title": "Id",
       "type": "integer"
+     },
+     "installed_release": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Installed Release"
+     },
+     "installed_sha": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Installed Sha"
      },
      "last_push_error": {
       "anyOf": [
@@ -333,9 +496,25 @@
       ],
       "title": "Last Seen"
      },
+     "needs_reprovision": {
+      "default": false,
+      "title": "Needs Reprovision",
+      "type": "boolean"
+     },
      "site_id": {
       "title": "Site Id",
       "type": "string"
+     },
+     "software_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Software Version"
      }
     },
     "required": [
@@ -435,6 +614,26 @@
     "title": "EventsSummary",
     "type": "object"
    },
+   "FleetDefaultIn": {
+    "properties": {
+     "release": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Release"
+     }
+    },
+    "required": [
+     "release"
+    ],
+    "title": "FleetDefaultIn",
+    "type": "object"
+   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -450,8 +649,8 @@
    },
    "Health": {
     "properties": {
-     "silence_alerts": {
-      "title": "Silence Alerts",
+     "alerts": {
+      "title": "Alerts",
       "type": "string"
      },
      "status": {
@@ -466,7 +665,7 @@
     "required": [
      "status",
      "storage",
-     "silence_alerts"
+     "alerts"
     ],
     "title": "Health",
     "type": "object"
@@ -717,6 +916,62 @@
      "ok"
     ],
     "title": "ReconcileOut",
+    "type": "object"
+   },
+   "ReleaseAssign": {
+    "properties": {
+     "hold": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hold"
+     },
+     "release": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Release"
+     }
+    },
+    "title": "ReleaseAssign",
+    "type": "object"
+   },
+   "ReleasesOut": {
+    "properties": {
+     "fleet_default": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fleet Default"
+     },
+     "tags": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     }
+    },
+    "required": [
+     "tags",
+     "fleet_default"
+    ],
+    "title": "ReleasesOut",
     "type": "object"
    },
    "SiteIn": {
@@ -1090,6 +1345,7 @@
     ]
    },
    "post": {
+    "description": "Issue the device's ONE secret (Rpi-Detector D-020).\n\nThe secret is shown once in this response and never stored. Two keys are\nderived from it with fixed labels (`security.derive_keys`): the\nauthentication key, kept as an argon2 hash, and the configuration signing\nkey, kept in clear because this side signs. The device derives the same two\nfrom the same secret. One paste at provisioning covers both.\n\nIf a fleet default release is set (D-021) the new device is assigned it\nimmediately, so a fresh unit cannot drift unnoticed.",
     "operationId": "create_device_api_admin_devices_post",
     "requestBody": {
      "content": {
@@ -1260,6 +1516,59 @@
     ]
    }
   },
+  "/api/admin/devices/{device_pk}/release": {
+   "put": {
+    "description": "Assign a release and/or set the hold for one device, then re-sign and\nre-publish its configuration so the unit sees it at its next poll.",
+    "operationId": "assign_release_api_admin_devices__device_pk__release_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "device_pk",
+      "required": true,
+      "schema": {
+       "title": "Device Pk",
+       "type": "integer"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReleaseAssign"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DeviceConfigOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Assign Release",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
   "/api/admin/devices/{device_pk}/status": {
    "delete": {
     "description": "Forget the device's *current* heartbeat reading; history is kept.\n\nThe heartbeat route is monotonic on the device's own `last_seen`. A unit\nwhose clock was wrong (a Pi without an RTC booting a year ahead) can leave a\nreading no correct heartbeat will ever beat, and until 2026-10-24 nothing\ncould clear it short of deleting the device. The route now refuses\nfar-future timestamps, so this is the escape hatch for a reading accepted\nbefore that, or for a clock that was merely a few minutes fast.",
@@ -1413,6 +1722,69 @@
      }
     },
     "summary": "Run Reconcile",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/releases": {
+   "get": {
+    "operationId": "list_releases_api_admin_releases_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ReleasesOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "List Releases",
+    "tags": [
+     "admin"
+    ]
+   }
+  },
+  "/api/admin/releases/default": {
+   "put": {
+    "description": "The release a NEW device is assigned at creation. Does not touch\nexisting assignments \u2014 staging is per device, on purpose.",
+    "operationId": "set_fleet_default_api_admin_releases_default_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FleetDefaultIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ReleasesOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Set Fleet Default",
     "tags": [
      "admin"
     ]
@@ -1827,7 +2199,7 @@
   },
   "/api/devices/config": {
    "get": {
-    "description": "**The configuration blob, byte for byte** (D-020).\n\nTwo consumers. A unit with storage configured reads\n`sites/{site_id}/remote_config.json` from storage itself and uses this route\nonly as a debugging view. A **push-only** unit (no Azure, no local output\ndirectory \u2014 the QUICKGUIDE provisioning path) has no blob to read and polls\nthis route every `CONFIG_CHECK_INTERVAL` instead (device F-34, 2026-10-24).\nEither way it returns the stored document **byte for byte** \u2014 reading it\nhere and reading it from storage must never produce two different\ndocuments, because that is how a signature mismatch hides.\n\nIt deliberately does not compose a document of its own. If the blob is\nabsent, that is the honest answer: nothing has been published for this site.",
+    "description": "**This device's signed configuration, byte for byte** (D-020, Rpi D-020).\n\nSigned with the device's own key, so it is served from the device's row:\nthe exact bytes `_publish` signed, which are also what the site blob holds\nwhen this is the site's only device. A push-only unit (no storage) polls\nthis every `CONFIG_CHECK_INTERVAL`; a storage unit reads the blob and uses\nthis as a debugging view. Reading it here and reading it from storage must\nnever produce two different documents, because that is how a signature\nmismatch hides.\n\nIt deliberately does not compose a document of its own. If nothing has\nbeen published for this device, that is the honest answer (404): the unit\nkeeps its last valid configuration and never falls back to defaults.",
     "operationId": "device_config_api_devices_config_get",
     "parameters": [
      {

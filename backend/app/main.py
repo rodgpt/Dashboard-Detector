@@ -52,15 +52,17 @@ async def lifespan(_: FastAPI):
     # Build the storage client once, here, so a backend that cannot be
     # constructed fails the boot instead of every later request (review BE-07b).
     from app.services.storage import get_storage
+    from app.services import alerts
     get_storage()
-    if not settings().silence_webhook_url:
-        # Not a secret and not optional to know: with no webhook, a device that
-        # dies is a WARNING line in this log and a row in `device_alert` that the
-        # dashboard now shows — but nobody is paged. Say so once, where an
-        # operator reading the boot log will see it (review BE-05).
+    if alerts.transport() != "twilio":
+        # Not a secret and not optional to know: without Twilio configured here,
+        # every alert in the system (detections, silence, degradation, battery)
+        # is recorded and shown on the dashboard — and nobody is paged. The
+        # device sends nothing itself any more (Rpi-Detector D-020). Say so once,
+        # where an operator reading the boot log will see it.
         logging.getLogger("app").warning(
-            "OCEANKIND_SILENCE_WEBHOOK_URL is empty: device-silence alerts are recorded "
-            "and shown in the dashboard but nobody is notified out of band")
+            "alerts are %s: set OCEANKIND_TWILIO_SID/TOKEN/FROM and ALERT_TO so detections "
+            "and outages reach a human", alerts.transport())
     init_db()
     # The reconcile pass is the index's correctness mechanism (R-12.4), and one
     # that only runs when somebody remembers to call it is not a mechanism. In
@@ -84,17 +86,15 @@ app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
 class Health(BaseModel):
     status: str
     storage: str
-    # "webhook" when device-silence alerts reach somebody out of band,
-    # "log-only" when they are recorded and shown but nobody is paged (R-7.5).
-    silence_alerts: str
+    # "twilio" when alerts reach somebody, "log-only" when they are recorded and
+    # shown but nobody is paged, "off" when disabled (R-7.5, Rpi-Detector D-020).
+    alerts: str
 
 
 @app.get("/api/health", tags=["ops"], response_model=Health)
 def health():
-    s = settings()
-    return {"status": "ok", "storage": s.storage_backend,
-            "silence_alerts": ("off" if not s.silence_alerts_enabled
-                               else "webhook" if s.silence_webhook_url else "log-only")}
+    from app.services import alerts
+    return {"status": "ok", "storage": settings().storage_backend, "alerts": alerts.transport()}
 
 
 # No catch-all route. An unknown path is a 404 from FastAPI, which is correct:

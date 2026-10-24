@@ -1,5 +1,5 @@
-import { Fragment, useState, type FormEvent } from "react";
-import { admin, type AdminDevice, type Site } from "@/api/client";
+import { Fragment, useEffect, useState, type FormEvent } from "react";
+import { admin, type AdminDevice, type Releases, type Site } from "@/api/client";
 import { messageFor } from "@/pages/Admin";
 import DeviceConfigEditor from "@/pages/Admin/DeviceConfigEditor";
 import { formatDateTime, timeAgo } from "@/lib/time";
@@ -20,6 +20,51 @@ function pushHealth(d: AdminDevice): { text: string; bad: boolean } {
   return { text: `último envío ${timeAgo(d.last_push_utc!)}`, bad: false };
 }
 
+/**
+ * Release state in words (Rpi-Detector D-021). Installed comes from the unit's
+ * heartbeat (`ota` block); assigned from the signed configuration. The two
+ * disagreeing is normal for up to one poll plus one verify window; `failed_*`
+ * set on the assigned tag means the unit tried it and rolled back — that is the
+ * one state a human has to act on, so it is the one painted red.
+ */
+function releaseState(d: AdminDevice): { text: string; tone: "ok" | "bad" | "pending" | "muted" } {
+  const inst = d.installed_release ?? (d.installed_sha ? `commit ${d.installed_sha}` : null);
+  if (d.needs_reprovision) {
+    return { text: `${inst ?? "versión desconocida"} · re-provisionar (sin clave de firma)`, tone: "bad" };
+  }
+  if (!d.assigned_release) {
+    return { text: inst ? `${inst} · sin asignar` : "sin asignar", tone: "muted" };
+  }
+  if (d.failed_sha && (d.failed_release === d.assigned_release || !d.failed_release)) {
+    return { text: `${inst ?? "?"} · falló ${d.assigned_release}, revertida`, tone: "bad" };
+  }
+  if (d.hold) return { text: `${inst ?? "?"} · retenida (asignada ${d.assigned_release})`, tone: "pending" };
+  if (inst === d.assigned_release) return { text: inst, tone: "ok" };
+  return { text: `${inst ?? "?"} → ${d.assigned_release} (pendiente)`, tone: "pending" };
+}
+
+const TAG = /^v?[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/;
+
+/** A tag from the list, or one typed by hand (GitHub may be unreachable). */
+function ReleasePicker({ id, tags, value, onChange }: {
+  id: string; tags: string[]; value: string; onChange: (v: string) => void;
+}) {
+  return (
+    <div className="field">
+      <label htmlFor={id}>Release (tag git)</label>
+      <input id={id} list={`${id}-tags`} type="text" autoComplete="off" placeholder="v2.2.0"
+             value={value} onChange={(e) => onChange(e.target.value.trim())} />
+      <datalist id={`${id}-tags`}>
+        {tags.map((t) => <option key={t} value={t} />)}
+      </datalist>
+      <p className="hint">
+        {tags.length ? `${tags.length} tags publicados en el repositorio.` : "No se pudo leer la lista de tags; escribe el nombre."}
+        {" "}Vacío = sin asignación (el equipo conserva lo que corre).
+      </p>
+    </div>
+  );
+}
+
 interface Props {
   sites: Site[];
   devices: AdminDevice[];
@@ -35,11 +80,28 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
   const [feedback, setFeedback] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [configuring, setConfiguring] = useState<number | null>(null);
-  /** Plaintext key, held only until dismissed. Never stored in the device list. */
+  const [updating, setUpdating] = useState<number | null>(null);
+  /** Plaintext secret, held only until dismissed. Never stored in the device list. */
   const [issued, setIssued] = useState<{ device_id: string; key: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Releases (D-021): tags + fleet default. Loaded once; the list is advisory.
+  const [releases, setReleases] = useState<Releases | null>(null);
+  const [releasesError, setReleasesError] = useState<string | null>(null);
+  const [fleetInput, setFleetInput] = useState("");
+  const [assignInput, setAssignInput] = useState("");
+  const [assignHold, setAssignHold] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    admin.releases()
+      .then((r) => { if (alive) { setReleases(r); setFleetInput(r.fleet_default ?? ""); } })
+      .catch((err) => { if (alive) setReleasesError(messageFor(err, "No se pudo leer la lista de releases.")); });
+    return () => { alive = false; };
+  }, []);
+
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
+  const tags = releases?.tags ?? [];
 
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -69,7 +131,7 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
   }
 
   async function remove(d: AdminDevice) {
-    if (!confirm(`¿Eliminar el dispositivo ${d.device_id}? Su clave deja de funcionar en el `
+    if (!confirm(`¿Eliminar el dispositivo ${d.device_id}? Su secreto deja de funcionar en el `
       + `próximo contacto y el equipo conservará su última configuración válida.`)) return;
     try {
       await admin.deleteDevice(d.id);
@@ -90,14 +152,73 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
     }
   }
 
+  async function saveFleetDefault(e: FormEvent) {
+    e.preventDefault();
+    const v = fleetInput.trim();
+    if (v && !TAG.test(v)) { setFeedback({ kind: "error", text: "La release debe ser un tag git, p. ej. v2.2.0." }); return; }
+    setBusy(true);
+    try {
+      const r = await admin.setFleetRelease(v || null);
+      setReleases(r);
+      setFleetInput(r.fleet_default ?? "");
+      setFeedback({ kind: "ok", text: r.fleet_default
+        ? `Los equipos nuevos se crearán asignados a ${r.fleet_default}. Los existentes no cambian.`
+        : "Los equipos nuevos se crearán sin release asignada." });
+    } catch (err) {
+      setFeedback({ kind: "error", text: messageFor(err, "No se pudo guardar la release predeterminada.") });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openUpdate(d: AdminDevice) {
+    if (updating === d.id) { setUpdating(null); return; }
+    setUpdating(d.id);
+    setAssignInput(d.assigned_release ?? "");
+    setAssignHold(d.hold);
+  }
+
+  async function assign(d: AdminDevice, e: FormEvent) {
+    e.preventDefault();
+    const v = assignInput.trim();
+    if (v && !TAG.test(v)) { setFeedback({ kind: "error", text: "La release debe ser un tag git, p. ej. v2.2.0." }); return; }
+    setBusy(true);
+    try {
+      await admin.assignRelease(d.id, { release: v || null, hold: assignHold });
+      onChanged(devices.map((x) => x.id === d.id ? { ...x, assigned_release: v || null, hold: assignHold } : x));
+      setUpdating(null);
+      setFeedback({ kind: "ok", text: assignHold
+        ? `${d.device_id} retenido: no se actualizará aunque tenga release asignada.`
+        : v ? `${d.device_id} actualizará a ${v} en su próxima consulta (hasta 5 min), con verificación y rollback.`
+            : `${d.device_id} sin release asignada: conserva lo que corre.` });
+    } catch (err) {
+      setFeedback({ kind: "error", text: messageFor(err, "No se pudo asignar la release.") });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleHold(d: AdminDevice) {
+    setBusy(true);
+    try {
+      await admin.assignRelease(d.id, { hold: !d.hold });
+      onChanged(devices.map((x) => x.id === d.id ? { ...x, hold: !d.hold } : x));
+    } catch (err) {
+      onError(messageFor(err, "No se pudo cambiar la retención."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="panel">
       <h2>Dispositivos</h2>
       <p className="panel-note">
-        Cada equipo se autentica con una clave propia, separada de las sesiones
-        de usuario. La clave se muestra una sola vez al crearla; se copia al
-        archivo <code>/etc/oceankind.env</code> del equipo durante la preparación
-        en banco.
+        Cada equipo tiene un único secreto, separado de las sesiones de usuario:
+        de él derivan su clave de autenticación y la clave con la que verifica su
+        configuración. Se muestra una sola vez al crearlo y se pega en
+        <code>/etc/oceankind.env</code> del equipo durante la preparación en banco.
+        Las alertas por WhatsApp y voz salen desde este servidor, no desde los equipos.
       </p>
 
       <form onSubmit={create} noValidate>
@@ -125,20 +246,47 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
       {issued && (
         <div className="key-reveal" role="alert">
           <p>
-            <strong>Clave creada. Se muestra una sola vez.</strong> Cópiala ahora
-            y pégala en <code>/etc/oceankind.env</code> del equipo. Si se pierde,
-            elimina el dispositivo y crea uno nuevo.
+            <strong>Secreto creado. Se muestra una sola vez.</strong> Cópialo ahora
+            y pégalo en <code>/etc/oceankind.env</code> del equipo como
+            <code>OCEANKIND_DEVICE_SECRET</code>. Si se pierde, elimina el
+            dispositivo y crea uno nuevo.
           </p>
           <div className="key-line"><span>Identificador:</span> <code>{issued.device_id}</code></div>
-          <div className="key-line"><span>Clave:</span> <code>{issued.key}</code></div>
+          <div className="key-line"><span>Secreto:</span> <code>{issued.key}</code></div>
           <button type="button" className="btn btn-ghost btn-sm" onClick={async () => {
             try { await navigator.clipboard.writeText(issued.key); setCopied(true); } catch { setCopied(false); }
-          }}>{copied ? "Copiada ✓" : "Copiar clave"}</button>
+          }}>{copied ? "Copiado ✓" : "Copiar secreto"}</button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setIssued(null)}>
-            Ya la guardé — ocultar
+            Ya lo guardé — ocultar
           </button>
         </div>
       )}
+
+      <h3 style={{ marginTop: 28 }}>Versiones</h3>
+      <p className="panel-note">
+        Publicar una versión es crear un tag en el repositorio del equipo. Aquí se
+        decide qué equipos la toman y cuándo: primero el banco, después un sitio,
+        después el resto. Cada equipo descarga la release asignada, la verifica
+        durante un minuto y vuelve atrás solo si no arranca. Sin asignación, nadie
+        se actualiza.
+      </p>
+      {releasesError && <div className="form-feedback error" role="alert">{releasesError}</div>}
+      <form onSubmit={saveFleetDefault} noValidate>
+        <div className="form-grid">
+          <ReleasePicker id="fleet-release" tags={tags} value={fleetInput} onChange={setFleetInput} />
+          <div className="field">
+            <label>Predeterminada para equipos nuevos</label>
+            <p className="hint">
+              {releases?.fleet_default
+                ? `Hoy: ${releases.fleet_default}. Se asigna al crear un equipo; los existentes no cambian.`
+                : "Hoy ninguna: un equipo nuevo no se actualiza hasta que se le asigne una release."}
+            </p>
+            <button type="submit" className="btn btn-ghost btn-sm" disabled={busy || releases === null}>
+              Guardar predeterminada
+            </button>
+          </div>
+        </div>
+      </form>
 
       <div className="table-wrap" style={{ marginTop: 20 }}>
         <table className="data">
@@ -146,15 +294,17 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
             <tr>
               <th scope="col">Equipo</th><th scope="col">Sitio</th>
               <th scope="col">Última conexión</th><th scope="col">Envío de eventos</th>
+              <th scope="col">Versión</th>
               <th scope="col">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {devices.length === 0 && (
-              <tr><td colSpan={5} className="loading">Sin dispositivos registrados.</td></tr>
+              <tr><td colSpan={6} className="loading">Sin dispositivos registrados.</td></tr>
             )}
             {devices.map((d) => {
               const push = pushHealth(d);
+              const rel = releaseState(d);
               return (
               <Fragment key={d.id}>
                 <tr>
@@ -164,10 +314,25 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
                   <td className={push.bad ? "push-bad" : undefined} role={push.bad ? "alert" : undefined}>
                     {push.text}
                   </td>
+                  <td className={`release-${rel.tone}`} role={rel.tone === "bad" ? "alert" : undefined}>
+                    {rel.text}
+                  </td>
                   <td className="actions">
                     <button type="button" className="btn btn-ghost btn-sm"
-                            onClick={() => setConfiguring(configuring === d.id ? null : d.id)}>
+                            onClick={() => { setUpdating(null); setConfiguring(configuring === d.id ? null : d.id); }}>
                       {configuring === d.id ? "Cerrar" : "Configurar"}
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm"
+                            disabled={d.needs_reprovision}
+                            title={d.needs_reprovision ? "Creado antes del secreto único: elimínalo y créalo de nuevo" : "Asignar una release a este equipo"}
+                            onClick={() => { setConfiguring(null); openUpdate(d); }}>
+                      {updating === d.id ? "Cerrar" : "Actualizar"}
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm"
+                            disabled={busy || d.needs_reprovision}
+                            title={d.hold ? "Permitir que vuelva a actualizarse" : "Retener: no actualizar aunque tenga release asignada"}
+                            onClick={() => void toggleHold(d)}>
+                      {d.hold ? "Liberar" : "Retener"}
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm"
                             title="Olvidar la última lectura de estado (reloj adelantado)"
@@ -178,8 +343,33 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
                 </tr>
                 {configuring === d.id && (
                   <tr>
-                    <td colSpan={5}>
+                    <td colSpan={6}>
                       <DeviceConfigEditor deviceId={d.id} onClose={() => setConfiguring(null)} />
+                    </td>
+                  </tr>
+                )}
+                {updating === d.id && (
+                  <tr>
+                    <td colSpan={6}>
+                      <form className="row-editor" onSubmit={(e) => void assign(d, e)} noValidate>
+                        <div className="form-grid">
+                          <ReleasePicker id={`assign-${d.id}`} tags={tags} value={assignInput} onChange={setAssignInput} />
+                          <div className="field">
+                            <label htmlFor={`hold-${d.id}`}>Retener</label>
+                            <label className="hint" htmlFor={`hold-${d.id}`} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                              <input id={`hold-${d.id}`} type="checkbox" checked={assignHold}
+                                     onChange={(e) => setAssignHold(e.target.checked)} />
+                              No actualizar este equipo aunque tenga release asignada.
+                            </label>
+                            <p className="hint">
+                              Instalada: {d.installed_release ?? d.installed_sha ?? "desconocida"}.
+                              {d.failed_sha ? ` Falló y revirtió: ${d.failed_release ?? d.failed_sha}.` : ""}
+                            </p>
+                          </div>
+                        </div>
+                        <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>Asignar</button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setUpdating(null)}>Cancelar</button>
+                      </form>
                     </td>
                   </tr>
                 )}

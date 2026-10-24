@@ -40,10 +40,52 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
 
-    # held on behalf of devices. never leave the server (R-4.1, R-4.2)
+    # ── alerting: the backend is the only sender (Rpi-Detector D-020) ─────────
+    #
+    # Every WhatsApp and voice alert the system produces leaves from here, with
+    # the one Twilio credential, held on behalf of the fleet (R-4.1, R-4.2). No
+    # device holds any of this. Without SID, token and a sender number the
+    # transport is "log-only": alerts are recorded and shown on the dashboard,
+    # and nobody is paged — /api/health says so.
+    alerts_enabled: bool = True
     twilio_sid: str = ""
     twilio_token: str = ""
-    config_hmac_key: str = ""
+    twilio_from: str = ""                    # whatsapp:+56...
+    # Recipients, comma-separated `whatsapp:+56...`. ALERT_TO gets detections;
+    # TECH_TO gets silence, degradation, battery and the periodic heartbeat
+    # message. TECH_TO defaults to ALERT_TO when empty.
+    alert_to: str = ""
+    tech_to: str = ""
+    # Voice call on a cluster of detections (the old device behaviour, moved).
+    call_from: str = ""                      # +1...
+    call_to: str = ""                        # comma-separated +56...
+    call_cluster_count: int = 3
+    call_cluster_window_s: float = 240.0
+    call_cooldown_s: float = 900.0
+    # Approved WhatsApp content templates (SIDs are not secrets). Same three the
+    # device used; the heartbeat template is the one with a free-text field and
+    # doubles as the carrier for every operational message.
+    wa_tpl_alert: str = "HX901414845dda773c146ce65d79f79863"
+    wa_tpl_heartbeat: str = "HXe9015f651079907384ecabf3add8dd69"
+    wa_tpl_battery: str = "HX9cad665cd4be3a5a5482162d1776d1ba"
+    wa_tpl_version: str = "3"
+    # Public URL of this dashboard, for the ?play= link in detection alerts.
+    dashboard_url: str = ""
+    # The periodic "I am alive" message to the technical contact, hours. 0 = off.
+    alert_heartbeat_hours: float = 12.0
+    # Battery thresholds (V), debounced over consecutive heartbeats. Moved from
+    # the device unchanged.
+    battery_warning_v: float = 11.8
+    battery_critical_v: float = 11.2
+    battery_emergency_v: float = 10.8
+    battery_recovery_v: float = 12.2
+    battery_debounce_heartbeats: int = 10
+    # Timezone for the times quoted in messages.
+    site_tz: str = "America/Santiago"
+
+    # ── releases (Rpi-Detector D-021) ───────────────────────────────────────
+    # GitHub repository whose tags are offered as releases in the admin panel.
+    release_repo: str = "rodgpt/Rpi-Detector"
 
     # --- the reconcile pass (R-12.4, D-021, D-022) ---------------------------
     #
@@ -100,12 +142,9 @@ class Settings(BaseSettings):
     #    Set to 0 to notify exactly once per outage and never repeat.
     silence_renotify_hours: float = 24.0
 
-    # Where a notification goes. A plain webhook: portable by construction, so it
-    # works with whatever the client already runs. Empty means log-only, which is
-    # the current state — Twilio remains blocked on client console access (F-04),
-    # and the alert is recorded either way so nothing is lost when a transport
-    # finally exists.
-    silence_webhook_url: str = ""
+    # Where a silence notification goes: the Twilio transport above (D-020).
+    # The webhook that used to be here was never configured anywhere and the
+    # client decided against a second notification service.
 
     # Fallback when no tuned configuration exists for a site's device. Matches
     # the contract's default for `heartbeat_interval_s`.

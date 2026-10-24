@@ -35,7 +35,19 @@ export interface paths {
         /** List Devices */
         get: operations["list_devices_api_admin_devices_get"];
         put?: never;
-        /** Create Device */
+        /**
+         * Create Device
+         * @description Issue the device's ONE secret (Rpi-Detector D-020).
+         *
+         *     The secret is shown once in this response and never stored. Two keys are
+         *     derived from it with fixed labels (`security.derive_keys`): the
+         *     authentication key, kept as an argon2 hash, and the configuration signing
+         *     key, kept in clear because this side signs. The device derives the same two
+         *     from the same secret. One paste at provisioning covers both.
+         *
+         *     If a fleet default release is set (D-021) the new device is assigned it
+         *     immediately, so a fresh unit cannot drift unnoticed.
+         */
         post: operations["create_device_api_admin_devices_post"];
         delete?: never;
         options?: never;
@@ -85,6 +97,27 @@ export interface paths {
          *     would leave the panel showing a configuration no device will ever apply.
          */
         put: operations["put_device_config_api_admin_devices__device_pk__config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/devices/{device_pk}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Assign Release
+         * @description Assign a release and/or set the hold for one device, then re-sign and
+         *     re-publish its configuration so the unit sees it at its next poll.
+         */
+        put: operations["assign_release_api_admin_devices__device_pk__release_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -202,6 +235,44 @@ export interface paths {
          *     so somebody investigating drift can act on it without waiting a day.
          */
         post: operations["run_reconcile_api_admin_index_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Releases */
+        get: operations["list_releases_api_admin_releases_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/releases/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Fleet Default
+         * @description The release a NEW device is assigned at creation. Does not touch
+         *     existing assignments — staging is per device, on purpose.
+         */
+        put: operations["set_fleet_default_api_admin_releases_default_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -385,19 +456,19 @@ export interface paths {
         };
         /**
          * Device Config
-         * @description **The configuration blob, byte for byte** (D-020).
+         * @description **This device's signed configuration, byte for byte** (D-020, Rpi D-020).
          *
-         *     Two consumers. A unit with storage configured reads
-         *     `sites/{site_id}/remote_config.json` from storage itself and uses this route
-         *     only as a debugging view. A **push-only** unit (no Azure, no local output
-         *     directory — the QUICKGUIDE provisioning path) has no blob to read and polls
-         *     this route every `CONFIG_CHECK_INTERVAL` instead (device F-34, 2026-10-24).
-         *     Either way it returns the stored document **byte for byte** — reading it
-         *     here and reading it from storage must never produce two different
-         *     documents, because that is how a signature mismatch hides.
+         *     Signed with the device's own key, so it is served from the device's row:
+         *     the exact bytes `_publish` signed, which are also what the site blob holds
+         *     when this is the site's only device. A push-only unit (no storage) polls
+         *     this every `CONFIG_CHECK_INTERVAL`; a storage unit reads the blob and uses
+         *     this as a debugging view. Reading it here and reading it from storage must
+         *     never produce two different documents, because that is how a signature
+         *     mismatch hides.
          *
-         *     It deliberately does not compose a document of its own. If the blob is
-         *     absent, that is the honest answer: nothing has been published for this site.
+         *     It deliberately does not compose a document of its own. If nothing has
+         *     been published for this device, that is the honest answer (404): the unit
+         *     keeps its last valid configuration and never falls back to defaults.
          */
         get: operations["device_config_api_devices_config_get"];
         put?: never;
@@ -734,6 +805,8 @@ export interface components {
         AlertOut: {
             /** Cleared Utc */
             cleared_utc: string | null;
+            /** Detail */
+            detail?: string | null;
             /** Id */
             id: number;
             /** Kind */
@@ -771,12 +844,19 @@ export interface components {
             config_version: string;
             /** Device Id */
             device_id: string;
+            /**
+             * Hold
+             * @default false
+             */
+            hold: boolean;
             /** Is Default */
             is_default: boolean;
             /** Publish Warning */
             publish_warning?: string | null;
             /** Published To */
             published_to?: string | null;
+            /** Release */
+            release?: string | null;
             /** Site Id */
             site_id: string;
             /** Updated Utc */
@@ -788,10 +868,25 @@ export interface components {
         DeviceCreated: {
             /** Active */
             active: boolean;
+            /** Assigned Release */
+            assigned_release?: string | null;
             /** Device Id */
             device_id: string;
+            /** Failed Release */
+            failed_release?: string | null;
+            /** Failed Sha */
+            failed_sha?: string | null;
+            /**
+             * Hold
+             * @default false
+             */
+            hold: boolean;
             /** Id */
             id: number;
+            /** Installed Release */
+            installed_release?: string | null;
+            /** Installed Sha */
+            installed_sha?: string | null;
             /** Key */
             key: string;
             /** Last Push Error */
@@ -802,8 +897,15 @@ export interface components {
             last_push_utc?: string | null;
             /** Last Seen */
             last_seen: string | null;
+            /**
+             * Needs Reprovision
+             * @default false
+             */
+            needs_reprovision: boolean;
             /** Site Id */
             site_id: string;
+            /** Software Version */
+            software_version?: string | null;
         };
         /** DeviceIn */
         DeviceIn: {
@@ -816,10 +918,25 @@ export interface components {
         DeviceOut: {
             /** Active */
             active: boolean;
+            /** Assigned Release */
+            assigned_release?: string | null;
             /** Device Id */
             device_id: string;
+            /** Failed Release */
+            failed_release?: string | null;
+            /** Failed Sha */
+            failed_sha?: string | null;
+            /**
+             * Hold
+             * @default false
+             */
+            hold: boolean;
             /** Id */
             id: number;
+            /** Installed Release */
+            installed_release?: string | null;
+            /** Installed Sha */
+            installed_sha?: string | null;
             /** Last Push Error */
             last_push_error?: string | null;
             /** Last Push Error Utc */
@@ -828,8 +945,15 @@ export interface components {
             last_push_utc?: string | null;
             /** Last Seen */
             last_seen: string | null;
+            /**
+             * Needs Reprovision
+             * @default false
+             */
+            needs_reprovision: boolean;
             /** Site Id */
             site_id: string;
+            /** Software Version */
+            software_version?: string | null;
         };
         /** EventsPage */
         EventsPage: {
@@ -866,6 +990,11 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** FleetDefaultIn */
+        FleetDefaultIn: {
+            /** Release */
+            release: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -873,8 +1002,8 @@ export interface components {
         };
         /** Health */
         Health: {
-            /** Silence Alerts */
-            silence_alerts: string;
+            /** Alerts */
+            alerts: string;
             /** Status */
             status: string;
             /** Storage */
@@ -965,6 +1094,20 @@ export interface components {
             rejected: number;
             /** Site Id */
             site_id: string;
+        };
+        /** ReleaseAssign */
+        ReleaseAssign: {
+            /** Hold */
+            hold?: boolean | null;
+            /** Release */
+            release?: string | null;
+        };
+        /** ReleasesOut */
+        ReleasesOut: {
+            /** Fleet Default */
+            fleet_default: string | null;
+            /** Tags */
+            tags: string[];
         };
         /** SiteIn */
         SiteIn: {
@@ -1255,6 +1398,41 @@ export interface operations {
             };
         };
     };
+    assign_release_api_admin_devices__device_pk__release_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_pk: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseAssign"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceConfigOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     reset_device_status_api_admin_devices__device_pk__status_delete: {
         parameters: {
             query?: never;
@@ -1355,6 +1533,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReconcileOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_releases_api_admin_releases_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleasesOut"];
+                };
+            };
+        };
+    };
+    set_fleet_default_api_admin_releases_default_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetDefaultIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleasesOut"];
                 };
             };
             /** @description Validation Error */

@@ -167,8 +167,42 @@ async def _silence_loop(interval_s: float) -> None:
         await asyncio.sleep(interval_s)
 
 
+def send_heartbeat_messages() -> int:
+    """The periodic "still alive" WhatsApp per site (Rpi-Detector D-020; the
+    device used to send this itself). One message per site that has a current
+    heartbeat. Returns how many were queued."""
+    from app.core.models import Device, DeviceStatus
+    from app.services import alerts
+    n = 0
+    with Session(engine()) as db:
+        for site_id in _site_ids(db):
+            device = db.exec(select(Device).where(Device.site_id == site_id)).first()
+            if not device:
+                continue
+            row = db.get(DeviceStatus, device.id)
+            if not row:
+                continue
+            alerts.enqueue(alerts.heartbeat_message, alerts.station_name(db, site_id), dict(row.payload))
+            n += 1
+    return n
+
+
+async def _alerts_heartbeat_loop(interval_s: float) -> None:
+    await asyncio.sleep(STARTUP_DELAY_S)
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            n = await asyncio.to_thread(send_heartbeat_messages)
+            log.info("heartbeat messages queued for %d site(s)", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception:                                       # noqa: BLE001
+            log.exception("alert heartbeat loop iteration failed")
+
+
 _task: Optional[asyncio.Task] = None
 _silence_task: Optional[asyncio.Task] = None
+_alerts_task: Optional[asyncio.Task] = None
 
 
 def start() -> Optional[asyncio.Task]:
@@ -187,6 +221,7 @@ def start() -> Optional[asyncio.Task]:
     # tests do, and a deployment driving it externally would — must not silently
     # take device-silence alerting with it.
     _start_silence()
+    _start_alert_heartbeat()
 
     hours = s.reconcile_interval_hours
     if hours <= 0:
@@ -215,9 +250,20 @@ def _start_silence() -> None:
              s.silence_min_minutes, s.silence_renotify_hours)
 
 
+def _start_alert_heartbeat() -> None:
+    global _alerts_task
+    from app.services import alerts
+    s = settings()
+    alerts.start_worker()
+    if s.alert_heartbeat_hours <= 0 or alerts.transport() != "twilio":
+        return
+    _alerts_task = asyncio.create_task(_alerts_heartbeat_loop(s.alert_heartbeat_hours * 3600))
+    log.info("alert heartbeat started: every %sh to the technical contact", s.alert_heartbeat_hours)
+
+
 async def stop() -> None:
-    global _task, _silence_task
-    for name in ("_task", "_silence_task"):
+    global _task, _silence_task, _alerts_task
+    for name in ("_task", "_silence_task", "_alerts_task"):
         task = globals()[name]
         if task is not None:
             task.cancel()

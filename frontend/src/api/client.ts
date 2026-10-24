@@ -104,9 +104,18 @@ export type EventsSummary = Omit<Schemas["EventsSummary"], "by_day" | "hourly"> 
 
 export type Me = Schemas["Me"];
 export type AdminUser = Schemas["UserOut"];
+/** Carries push health (D-022) and release state (Rpi-Detector D-021):
+ *  `installed_release`/`installed_sha` from the heartbeat's `ota` block,
+ *  `assigned_release`/`hold` from the signed configuration, `failed_*` when the
+ *  unit tried an assignment and rolled back. `needs_reprovision` = created
+ *  before the one-secret model (D-020); nothing can be signed for it. */
 export type AdminDevice = Schemas["DeviceOut"];
-/** `key` exists in the creation response only, never readable again (D-017). */
+/** `key` is the ONE device secret (Rpi-Detector D-020): in the creation
+ *  response only, never readable again. */
 export type AdminDeviceCreated = Schemas["DeviceCreated"];
+/** Tags GitHub lists for the device repository (may be empty when unreachable)
+ *  plus the release a NEW device is assigned at creation. */
+export type Releases = Schemas["ReleasesOut"];
 /** An outage `silence.py` recorded (R-7.5). `open` = not yet cleared. */
 export type DeviceAlert = Schemas["AlertOut"];
 export type IndexDay = Schemas["IndexDayOut"];
@@ -130,6 +139,13 @@ export interface DeviceConfig {
 export type DeviceConfigState = Omit<Schemas["DeviceConfigOut"], "config"> & { config: DeviceConfig };
 
 // ── calls ───────────────────────────────────────────────────────────────────
+
+/** Unauthenticated liveness. `alerts` says whether anything this backend
+ *  decides to alert about reaches a human (`twilio`) or only the log and this
+ *  dashboard (`log-only` / `off`) — Rpi-Detector D-020. */
+export const ops = {
+  health: () => req<Health>("/health"),
+};
 
 export const auth = {
   login: (email: string, password: string) =>
@@ -236,4 +252,14 @@ export const admin = {
   getDeviceConfig: (id: number) => req<DeviceConfigState>(`/admin/devices/${id}/config`),
   setDeviceConfig: (id: number, config: DeviceConfig) =>
     req<DeviceConfigState>(`/admin/devices/${id}/config`, { method: "PUT", ...json(config) }),
+
+  // ── releases (Rpi-Detector D-021): publish a tag, then choose who takes it ──
+  releases: () => req<Releases>("/admin/releases"),
+  /** The release a NEW device gets at creation. Existing assignments untouched. */
+  setFleetRelease: (release: string | null) =>
+    req<Releases>("/admin/releases/default", { method: "PUT", ...json({ release }) }),
+  /** Assign a release and/or set the hold for one device. Re-signs and
+   *  re-publishes its configuration; the unit acts at its next poll (≤ 300 s). */
+  assignRelease: (id: number, body: { release?: string | null; hold?: boolean }) =>
+    req<DeviceConfigState>(`/admin/devices/${id}/release`, { method: "PUT", ...json(body) }),
 };

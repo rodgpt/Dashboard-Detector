@@ -188,9 +188,12 @@ def gen_events(out: Path, site, now, days, rng, clips=True, episodes_per_day=10.
     return sorted(written, key=lambda e: e["captured_utc"], reverse=True)
 
 
-def gen_status(out: Path, site, now, rng, healthy=True, alerts_enabled=True):
+def gen_status(out: Path, site, now, rng, healthy=True, ota_failed=False):
+    # `ota` (Rpi-Detector D-021): the degraded site also models a release that
+    # was assigned, tried, and rolled back — the one state the panel paints red.
+    installed = "v2.1.0"
     s = envelope(site["id"], site["device"], now,
-        software_version="2.0.0",
+        software_version="2.1.0",
         last_seen=iso(now - timedelta(seconds=rng.randint(5, 90))),
         session_start=iso(now - timedelta(days=rng.randint(2, 30))),
         uptime_seconds=rng.randint(60_000, 900_000),
@@ -198,11 +201,21 @@ def gen_status(out: Path, site, now, rng, healthy=True, alerts_enabled=True):
         health={
             "detector_ok": healthy,
             "audio_ok": healthy,
+            "capture_ok": healthy,
             "duty_cycle_pct": round(rng.uniform(98.6, 99.9), 1) if healthy else 61.2,
+            "last_clip_age_s": round(rng.uniform(0.5, 6.0), 1) if healthy else 184.0,
             "clips_dropped": 0 if healthy else rng.randint(3, 40),
             "upload_backlog": 0 if healthy else rng.randint(1, 12),
-            "alerts_enabled": alerts_enabled,
             "degraded_reason": None if healthy else "detector failed to load",
+        },
+        ota={
+            "installed_sha": "a1b2c3d",
+            "installed_release": installed,
+            "failed_sha": "e4f5a6b" if ota_failed else None,
+            "failed_release": "v2.2.0" if ota_failed else None,
+            "assigned_release": "v2.2.0" if ota_failed else installed,
+            "hold": False,
+            "in_progress": False,
         },
         detection={
             "detectors": ["psd_tonal"] if healthy else [],
@@ -388,10 +401,11 @@ def main():
     for i, site in enumerate(SITES):
         events = gen_events(out, site, now, args.days, rng, clips=not args.no_clips,
                             episodes_per_day=args.episodes_per_day)
-        # matanzas ships degraded on purpose; zapallar is the bench case — fully
-        # healthy, just no Twilio, so the "operativo (banco, sin Twilio)" path
-        # has a fixture to render against instead of only existing on paper.
-        gen_status(out, site, now, rng, healthy=(i == 0), alerts_enabled=(i != 0))
+        # matanzas ships degraded on purpose, and with a release that failed and
+        # rolled back (D-021), so the red "falló … revertida" path has a fixture
+        # to render against instead of only existing on paper. The old "bench,
+        # no Twilio" case is gone with D-020: no unit holds Twilio any more.
+        gen_status(out, site, now, rng, healthy=(i == 0), ota_failed=(i != 0))
         gen_power_history(out, site, now, rng)
         gen_acoustic(out, site, now, rng)
         gen_ocean(out, site, now, rng)

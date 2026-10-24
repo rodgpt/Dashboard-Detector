@@ -126,6 +126,14 @@ class Device(SQLModel, table=True):
         default=None, sa_column=Column(_TZ_DATETIME, nullable=True))
     last_push_error: Optional[str] = None
 
+    # Per-device configuration signing key (Rpi-Detector D-020), derived from
+    # the one secret issued at creation (`security.derive_keys`). In clear by
+    # necessity — this side signs. NULL means the device was created before
+    # D-020 with the global key and must be re-provisioned: it can still push
+    # and heartbeat with its old credential, but no configuration or release
+    # can be signed for it (the routes say so with 409).
+    config_key: Optional[str] = None
+
 
 class DeviceStatus(SQLModel, table=True):
     """Current health/telemetry snapshot per device (`DATA-CONTRACT.md`,
@@ -250,7 +258,9 @@ class DetectionEvent(SQLModel, table=True):
 class DeviceAlert(SQLModel, table=True):
     """An open fault against a site, and what we have told anyone about it (R-7.5).
 
-    Today there is one kind, `silent`: the unit has stopped reporting. R-7.4 is
+    Kinds: `silent` (the unit has stopped reporting, from `services/silence.py`),
+    `degraded` and `battery` (from heartbeat transitions, `services/alerts.py`,
+    Rpi-Detector D-020). The first one is the reason this table exists. R-7.4 is
     satisfied by a badge on a page, which is enough for a unit somebody is
     already looking at and useless for one that dies at 02:00 — and given the
     system exists to notice detonations, a silently dead node is the failure it
@@ -286,6 +296,9 @@ class DeviceAlert(SQLModel, table=True):
         default=None, sa_column=Column(_TZ_DATETIME, nullable=True))
     notify_count: int = 0
     notify_error: Optional[str] = None
+    # What the alert is about, for kinds that carry one (Rpi-Detector D-020):
+    # the `degraded_reason` text for `degraded`, "CRITICA 11.05 V" for `battery`.
+    detail: Optional[str] = None
 
     @property
     def open(self) -> bool:
@@ -355,5 +368,29 @@ class DeviceConfig(SQLModel, table=True):
     device_id: str = Field(index=True, unique=True)      # Device.device_id
     config_json: str
     version: int = 2                     # 1 is the implicit defaults version
+    updated_utc: datetime = Field(
+        default_factory=_now, sa_column=Column(_TZ_DATETIME, nullable=False, default=_now))
+
+    # Assigned release (Rpi-Detector D-021): a git tag the unit converges to via
+    # its OTA, and a hold that freezes it regardless. Both travel inside the
+    # signed document's `config` object next to the thresholds. NULL release =
+    # nothing assigned; the unit keeps whatever it runs.
+    release: Optional[str] = None
+    hold: bool = False
+    # The exact signed document last published for this device, so
+    # GET /api/devices/config returns byte for byte what was signed, and a
+    # push-only unit (no blob) has something to fetch.
+    signed_json: Optional[str] = None
+
+
+class FleetRelease(SQLModel, table=True):
+    """The release a NEW device is assigned at creation (D-021). One row.
+
+    Without it a freshly provisioned unit has no assignment and would drift
+    for as long as nobody noticed. Set from the admin panel."""
+    __tablename__ = "fleet_release"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    release: Optional[str] = None
     updated_utc: datetime = Field(
         default_factory=_now, sa_column=Column(_TZ_DATETIME, nullable=False, default=_now))

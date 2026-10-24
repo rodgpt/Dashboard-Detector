@@ -257,6 +257,12 @@ table.data td.actions .btn + .btn { margin-left: 8px; }
 .banner.error { background: var(--err-fill); border: 1px solid var(--err-border); color: var(--err-text); }
 /* Admin → Dispositivos: a push rejected more recently than the last success. */
 td.push-bad { color: var(--err-text); font-weight: 600; }
+/* Release state (Rpi-Detector D-021): red only for "tried it and rolled back"
+   or "cannot be signed for", the two states a human must act on. */
+td.release-bad     { color: var(--err-text);  font-weight: 600; }
+td.release-pending { color: var(--warn-text); }
+td.release-ok      { color: var(--ok-text); }
+td.release-muted   { color: var(--dim); }
 /* The spectrogram canvas stays mounted while computing (it has to, for the ref
    to exist when the pixels arrive) and is hidden until drawn. */
 .spectrogram[hidden] { display: none; }

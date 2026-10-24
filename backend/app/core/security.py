@@ -14,6 +14,26 @@ from app.core.models import User, SiteAccess
 _ph = PasswordHasher()
 COOKIE = "oceankind_session"
 
+# ── one device secret, two keys (Rpi-Detector D-020) ─────────────────────────
+# The admin panel issues ONE secret per device, shown once. Both sides derive
+# two keys from it with fixed labels: the authentication key the device presents
+# in X-Device-Key (stored here only as an argon2 hash) and the configuration
+# signing key (stored here in clear — a signer has to hold its key). One paste at
+# provisioning, per-device blast radius: a stolen unit yields keys good for that
+# unit alone, and revoking the device revokes both. The device implements the
+# identical derivation in oceankind/config.py; change both or neither.
+_AUTH_LABEL = b"oceankind:auth:v1"
+_CONFIG_LABEL = b"oceankind:config:v1"
+
+
+def derive_keys(secret: str) -> tuple[str, str]:
+    """(auth_key, config_key), both hex HMAC-SHA256 of a fixed label under the secret."""
+    import hashlib
+    import hmac
+    k = secret.encode()
+    return (hmac.new(k, _AUTH_LABEL, hashlib.sha256).hexdigest(),
+            hmac.new(k, _CONFIG_LABEL, hashlib.sha256).hexdigest())
+
 
 def hash_password(pw: str) -> str:
     return _ph.hash(pw)

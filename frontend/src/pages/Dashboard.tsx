@@ -16,7 +16,7 @@ import AppHeader from "@/components/AppHeader";
 import SitePicker from "@/components/SitePicker";
 import HealthBadge, { readHealth, type HealthState } from "@/components/HealthBadge";
 import { useResource } from "@/hooks/useResource";
-import { data, type DeviceAlert, type Site } from "@/api/client";
+import { data, ops, type DeviceAlert, type Health, type Site } from "@/api/client";
 import { formatDateTime, timeAgo } from "@/lib/time";
 import Detections from "@/pages/views/Detections";
 import SensorStatus from "@/pages/views/SensorStatus";
@@ -56,6 +56,10 @@ export default function Dashboard() {
   const alerts = useResource<{ alerts: DeviceAlert[] }>(
     () => data.alerts(siteId!), [siteId], { enabled: !!siteId, pollMs: 300_000 });
   const openAlerts = alerts.data?.alerts.filter((a) => a.open) ?? [];
+  // Whether anything this backend alerts about reaches a human (Rpi-Detector
+  // D-020: the backend is the only sender). Not per site, not per unit.
+  const server = useResource<Health>(() => ops.health(), [], { pollMs: 300_000 });
+  const alertsReachNobody = server.data != null && server.data.alerts !== "twilio";
 
   if (sites.loading) return <Shell><div className="loading">Cargando sitios…</div></Shell>;
 
@@ -128,21 +132,23 @@ export default function Dashboard() {
               ? `Aviso enviado ${a.notify_count} ${a.notify_count === 1 ? "vez" : "veces"}.`
               : a.notify_error
                 ? `El aviso externo falló: ${a.notify_error}.`
-                : "Nadie ha sido avisado fuera de este panel (sin webhook configurado)."}
+                : "Nadie ha sido avisado fuera de este panel (el servidor no tiene Twilio configurado)."}
           </span>
         </div>
       ))}
 
-      {/* Informativo, no un fallo: un equipo de banco sin Twilio sigue
-          detectando y registrando con normalidad, solo no avisa por WhatsApp.
-          Independiente del estado de salud — por eso no se repite el texto
-          del badge de arriba (R-7.4: una sola fuente para el mismo aviso). */}
-      {health.state === "ok" && health.alertsEnabled === false && (
+      {/* Del servidor, no del equipo (D-020): desde 2026-10-24 el único que
+          avisa por WhatsApp/voz es el backend. Si no tiene Twilio, NINGUNA
+          detección, caída ni degradación de NINGÚN sitio llega a nadie —
+          solo a este panel. Informativo en banco; en producción es un fallo
+          de despliegue, por eso el aviso es visible y no se puede ocultar. */}
+      {alertsReachNobody && (
         <div className="banner warn" role="status">
           <span>
-            <strong>Alertas por WhatsApp desactivadas.</strong> Sin credenciales
-            Twilio — modo banco. Las detecciones se siguen registrando y
-            mostrando con normalidad; solo no se notifican por WhatsApp.
+            <strong>Las alertas no llegan a nadie</strong> ({server.data?.alerts}):
+            el servidor no tiene Twilio configurado. Las detecciones y caídas se
+            registran y se muestran aquí con normalidad, pero nadie recibe
+            WhatsApp ni llamada hasta que se configure.
           </span>
         </div>
       )}

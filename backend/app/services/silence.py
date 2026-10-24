@@ -180,33 +180,19 @@ def _last_seen(db: Session, storage: Storage, site_id: str,
 def _notify(alert: DeviceAlert, message: str) -> Optional[str]:
     """Send one notification. Returns an error string, or None on success.
 
-    A plain webhook, and log-only when none is configured. Portable by
-    construction (R-1.1): no cloud notification service, so it works with
-    whatever the client already runs. Twilio is the obvious eventual transport
-    and stays blocked on client console access (F-04) — the alert is recorded
-    regardless, so nothing is lost in the meantime.
+    Through the backend's Twilio transport (`services/alerts.py`, Rpi-Detector
+    D-020) — WhatsApp to the technical contact. Synchronous on purpose: this
+    runs on the silence timer, not a request, and the caller records the error
+    on the alert row so an alert raised and never delivered stays visible. In
+    log-only mode (no Twilio configured) it logs and returns None.
     """
-    s = settings()
+    from app.services import alerts
     log.warning("DEVICE ALERT [%s] %s", alert.site_id, message)
-    if not s.silence_webhook_url:
-        return None
     try:
-        import urllib.request
-        payload = json.dumps({
-            "kind": alert.kind, "site_id": alert.site_id, "message": message,
-            "opened_utc": alert.opened_utc.isoformat(),
-            "last_seen_utc": alert.last_seen_utc.isoformat() if alert.last_seen_utc else None,
-            "notify_count": alert.notify_count + 1,
-        }).encode()
-        req = urllib.request.Request(
-            s.silence_webhook_url, data=payload,
-            headers={"content-type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=10):
-            return None
+        return alerts.ops_message(alerts.station_name(None, alert.site_id),
+                                  f"⚠️ {message}", sync=True)
     except Exception as e:                                      # noqa: BLE001
-        # Recorded on the alert, not swallowed: an alert raised and never
-        # delivered is the silent failure this whole module exists to prevent.
-        log.exception("device alert webhook failed for %s", alert.site_id)
+        log.exception("device alert notification failed for %s", alert.site_id)
         return f"{type(e).__name__}: {e}"[:300]
 
 

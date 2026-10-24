@@ -38,7 +38,9 @@
 
 **Backend and frontend** (`Dashboard-Detector`): FastAPI owning users (argon2, throttled login), roles, per-site access enforced per request, per-device API credentials, all secrets, and every storage read. Postgres holds users/roles/sites/device records — and, per Dashboard D-021, a derived index of detection events (the blob store is the record, never the query engine). React + Vite frontend served by nginx; the browser never holds a storage credential; clips are proxied.
 
-**Configuration flows the other way**, backend → storage → device: the backend clamps, signs (HMAC-SHA256, `OCEANKIND_CONFIG_HMAC_KEY`) and writes `sites/{site}/remote_config.json`; the device polls, verifies, and rejects whole on any failure (D-020, F-10 closed). Convergence of both implementations verified by independent recompute on 2026-08-22.
+**Configuration flows the other way**, backend → storage (or `GET /api/devices/config` for push-only units) → device: the backend clamps, signs (HMAC-SHA256 with a **per-device** key derived from the device's one secret — Rpi-Detector D-020, 2026-10-24; the shared `OCEANKIND_CONFIG_HMAC_KEY` is gone) and writes `sites/{site}/remote_config.json`; the device polls, verifies, and rejects whole on any failure (D-020, F-10 closed). The same signed document carries the device's assigned release and hold (Rpi-Detector D-021), which the unit's OTA converges to. Convergence of both implementations verified by independent recompute on 2026-08-22 and re-verified for the derived key on 2026-10-24.
+
+**Alerts flow from here, only.** Twilio lives in this backend (`services/alerts.py`); devices hold no credential and send nothing to anyone. Detection → push → WhatsApp; heartbeat transitions → degradation/battery WhatsApp; no heartbeat → silence WhatsApp. Log-only until configured.
 
 ---
 

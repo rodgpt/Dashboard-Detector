@@ -88,7 +88,7 @@ The reconcile timer (`services/scheduler.py`) also lives in the application proc
 
 **The reconcile pass runs in-process, on a timer** (R-12.4, D-022). Deliberately not a platform scheduler: an Azure Container Apps job or an EventBridge rule would be the cloud runtime dependency R-1.1 forbids — the same objection that removed Event Grid. `OCEANKIND_RECONCILE_INTERVAL_HOURS=0` disables it for a deployment driving the pass from outside; it is logged at warning level, because an index with no reconcile is a supported configuration but never an accidental one.
 
-**Device-silence alerts need a transport to reach anyone.** `OCEANKIND_SILENCE_WEBHOOK_URL` is empty in every deployment so far. The alert is still recorded (`device_alert`) and, since 2026-10-24, shown on the dashboard (`GET /api/sites/{site}/alerts`, `GET /api/admin/alerts`) and reported by `/api/health` as `silence_alerts: log-only`; the backend also warns about it once at boot. Until a webhook exists, a unit that dies at 02:00 is discovered by whoever opens the page.
+**This backend is the only thing that alerts a human (Rpi-Detector D-020, 2026-10-24).** Detections, silence, degradation, battery and the periodic heartbeat message all leave from `services/alerts.py` through Twilio, with the one credential the system has; devices hold none. Until `OCEANKIND_TWILIO_SID`/`TOKEN`/`FROM` and `OCEANKIND_ALERT_TO` are set, the backend is **log-only**: every alert is recorded (`device_alert`, where there is a row to record), shown on the dashboard (`GET /api/sites/{site}/alerts`, `GET /api/admin/alerts`) and reported by `/api/health` as `alerts: log-only`, and the backend warns once at boot — but nobody is paged, and a unit that dies at 02:00 is discovered by whoever opens the page. **The backend's uptime is now the alerting uptime.** Sends run on a daemon thread with a 15 s Twilio timeout so a slow carrier cannot stall a heartbeat; the queue is bounded (500) and drops are logged at ERROR. The old `OCEANKIND_SILENCE_WEBHOOK_URL` is gone.
 
 ### Recovering a database stamped at a deleted revision
 
@@ -124,7 +124,12 @@ One `DeviceAlert` row per outage is what holds the line. The check may run 288 t
 |---|---|
 | `DATABASE_URL` | Postgres connection |
 | `OCEANKIND_SESSION_SECRET` | signs session cookies |
-| `OCEANKIND_CONFIG_HMAC_KEY` | signs device configuration (R-6.2). Missing = tuning is refused with 503; never persisted-but-unpublished, never published unsigned. The same key goes to each device's `/etc/oceankind.env` |
+| *(no device signing key)* | Since Rpi-Detector D-020 each device's configuration is signed with a key derived from that device's own secret, stored on its row (`Device.config_key`). Nothing to set here; `OCEANKIND_CONFIG_HMAC_KEY` is ignored if present |
+| `OCEANKIND_TWILIO_SID`, `OCEANKIND_TWILIO_TOKEN`, `OCEANKIND_TWILIO_FROM` | the one Twilio credential and the WhatsApp sender. All three or the backend is log-only (R-4.1, D-020) |
+| `OCEANKIND_ALERT_TO`, `OCEANKIND_TECH_TO` | recipients (comma-separated `whatsapp:+56…`). Detections to the first; silence/degradation/battery/heartbeat to the second (falls back to the first) |
+| `OCEANKIND_CALL_FROM`, `OCEANKIND_CALL_TO` | voice call on a detection cluster. Optional |
+| `OCEANKIND_DASHBOARD_URL` | public URL of this dashboard, for the `?play=` link in detection messages |
+| `OCEANKIND_RELEASE_REPO` | GitHub repository whose tags the panel offers as releases (D-021). Default `rodgpt/Rpi-Detector` |
 | `OCEANKIND_AZURE_CONNECTION_STRING` | storage, when `STORAGE_BACKEND=azure` |
 | `OCEANKIND_COOKIE_SECURE` | `true` in production. `false` only for local http |
 | `OCEANKIND_RECONCILE_INTERVAL_HOURS` | How often the index is checked against storage. Default 24. `0` disables the in-process timer |

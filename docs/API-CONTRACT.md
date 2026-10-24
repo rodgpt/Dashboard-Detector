@@ -10,7 +10,7 @@ make openapi          # writes docs/openapi.json
 
 This document is the part a generator cannot produce: why the surface is shaped this way, and what a client is obliged to do with it.
 
-Last updated 2026-10-24 (review Batch B: alerts routes, device push health in `DeviceOut`, status reset, clip-path validation, heartbeat clock-skew rejection, `/api/health.silence_alerts`; Batch C: `GET /events/{event_id}`, `?hourly=true` on the summary, generated types actually consumed). Previous: 2026-09-23 (heartbeat), 2026-08-26 (event push), 2026-08-22. Requirement IDs refer to `../REQUIREMENTS.md`.
+Last updated 2026-10-24 (review Batch D — Rpi-Detector D-020/D-021: device creation issues ONE secret and the configuration is signed per device, `OCEANKIND_CONFIG_HMAC_KEY` gone; release routes `GET /admin/releases`, `PUT /admin/releases/default`, `PUT /admin/devices/{id}/release`; `DeviceOut` release fields and `needs_reprovision`; `AlertOut.detail`; `/api/health.alerts` replaces `silence_alerts`; `409` for pre-D-020 devices. Earlier the same day — Batch B: alerts routes, device push health in `DeviceOut`, status reset, clip-path validation, heartbeat clock-skew rejection; Batch C: `GET /events/{event_id}`, `?hourly=true` on the summary, generated types actually consumed). Previous: 2026-09-23 (heartbeat), 2026-08-26 (event push), 2026-08-22. Requirement IDs refer to `../REQUIREMENTS.md`.
 
 ---
 
@@ -45,17 +45,20 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `GET` | `/api/admin/index` | cookie, admin | Index drift per site and per day, plus when the pass last ran (R-12.5) |
 | `POST` | `/api/admin/index/reconcile` | cookie, admin | Run the reconcile now. `?site_id=` for one, omitted for all |
 | `POST` | `/api/admin/index/rebuild` | cookie, admin | Drop a site's index rows and rebuild from storage (R-12.2) |
-| `GET` | `/api/admin/devices` | cookie, admin | List devices with last contact time and push health (`last_push_utc`, `last_push_error_utc`, `last_push_error`) |
-| `POST` | `/api/admin/devices` | cookie, admin | Register a device. **The key is in this response only** |
-| `DELETE` | `/api/admin/devices/{id}` | cookie, admin | Revoke a device credential |
+| `GET` | `/api/admin/devices` | cookie, admin | List devices with last contact time, push health (`last_push_utc`, `last_push_error_utc`, `last_push_error`) and release state (`installed_release`/`installed_sha` from the heartbeat, `assigned_release`, `hold`, `failed_*`, `needs_reprovision`) |
+| `POST` | `/api/admin/devices` | cookie, admin | Register a device. **The ONE secret is in this response only** (Rpi-Detector D-020); the fleet default release is assigned at creation (D-021) |
+| `DELETE` | `/api/admin/devices/{id}` | cookie, admin | Revoke a device — both derived keys at once |
 | `DELETE` | `/api/admin/devices/{id}/status` | cookie, admin | Forget the device's current heartbeat reading (history kept) — for a clock that ran ahead |
-| `GET` | `/api/admin/alerts` | cookie, admin | Open device-silence alerts across all sites. `?open_only=false` for history |
-| `GET` | `/api/admin/devices/{id}/config` | cookie, admin | Effective (clamped) config, version, default or tuned |
-| `PUT` | `/api/admin/devices/{id}/config` | cookie, admin | Tune. Clamped on write; adjustments reported back |
-| `GET` | `/api/devices/config` | device headers | The published config blob, byte for byte. Debug view for storage units; **the delivery path for push-only units** (device F-34) |
-| `POST` | `/api/devices/events` | device headers | One detection, pushed. Low-latency path; idempotent on `event_id` (R-6.3, D-022) |
-| `POST` | `/api/devices/heartbeat` | device headers | `status.json`, pushed every heartbeat. No storage dependency; monotonic on `last_seen`, enforced here (D-018); `400` if `last_seen` is more than 300 s ahead of the server |
-| `GET` | `/api/health` | none | Liveness, which storage backend is wired, and whether silence alerts reach anyone (`silence_alerts`: `webhook`, `log-only`, `off`) |
+| `GET` | `/api/admin/alerts` | cookie, admin | Open device alerts across all sites (`silent`, `degraded`, `battery`). `?open_only=false` for history |
+| `GET` | `/api/admin/devices/{id}/config` | cookie, admin | Effective (clamped) config, version, default or tuned, plus `release`/`hold` |
+| `PUT` | `/api/admin/devices/{id}/config` | cookie, admin | Tune. Clamped on write; adjustments reported back. `409` for a device created before D-020 |
+| `GET` | `/api/admin/releases` | cookie, admin | Tags of the device repository (GitHub, cached 300 s; empty if unreachable) and the fleet default (Rpi-Detector D-021) |
+| `PUT` | `/api/admin/releases/default` | cookie, admin | The release a NEW device is assigned at creation. Existing assignments untouched |
+| `PUT` | `/api/admin/devices/{id}/release` | cookie, admin | Assign a release and/or set `hold` for one device; re-signs and re-publishes its configuration. `400` if not a tag, `409` pre-D-020 |
+| `GET` | `/api/devices/config` | device headers | This device's signed configuration, byte for byte what was signed for it. Debug view for storage units; **the delivery path for push-only units** (device F-34). `409` pre-D-020 |
+| `POST` | `/api/devices/events` | device headers | One detection, pushed. Low-latency path; idempotent on `event_id` (R-6.3, D-022). A first-time non-suppressed event triggers the detection alert (D-020) |
+| `POST` | `/api/devices/heartbeat` | device headers | `status.json`, pushed every heartbeat. No storage dependency; monotonic on `last_seen`, enforced here (D-018); `400` if `last_seen` is more than 300 s ahead of the server. Degradation and battery alerts are decided from the transition (D-020) |
+| `GET` | `/api/health` | none | Liveness, which storage backend is wired, and whether alerts reach anyone (`alerts`: `twilio`, `log-only`, `off`) |
 
 Everything not in that table requires a session. `/api/health` and `/api/auth/login` are the only two exceptions, and neither returns data (R-2.1).
 
@@ -93,10 +96,10 @@ Admin routes return `403` to an operator, never `404`.
 | `401` | No session, or it expired | Redirect to login. Do not retry |
 | `403` | Authenticated, not permitted | Show a permission message. Do not retry, do not redirect to login |
 | `404` | The resource genuinely is not there, including an absent blob | Render the panel as unavailable, keep the rest of the page |
-| `409` | Conflict, e.g. duplicate email | Show the message |
+| `409` | Conflict, e.g. duplicate email — or a device created before the one-secret model (Rpi-Detector D-020) that has no signing key: nothing can be signed for it until it is deleted and re-created | Show the message. The device routes return it to the unit too, which logs it |
 | `422` | Query parameter failed validation | A client bug. Fix the caller |
 | `429` | Login throttled | Show the wait. Do not retry automatically |
-| `503` | A server-side prerequisite is missing | Currently only `/api/devices/config` without `OCEANKIND_CONFIG_HMAC_KEY`. Loud by design: it must never degrade to an unsigned payload |
+| `503` | A server-side prerequisite is missing | None today. (Until 2026-10-24 this was `/api/devices/config` without the shared signing key; that key no longer exists.) Loud by design: nothing must ever degrade to an unsigned payload |
 
 Body is FastAPI's `{"detail": "..."}` throughout. `detail` is written to be shown to a user; it never contains a secret, a path or a stack trace (R-4.4).
 
@@ -248,15 +251,15 @@ The consequence is a real gap and it is worth naming: a typo in `event.captured_
 
 ## Devices
 
-**Configuration reaches devices through storage, not through this API** (D-020).
+**One secret per device (Rpi-Detector D-020).** `POST /api/admin/devices` returns a secret once. Both sides derive two keys from it with fixed labels (`core/security.derive_keys`; formulas in `DATA-CONTRACT.md` §Provisioning secret): the authentication key the device presents as `X-Device-Key`, stored here only as an argon2 hash, and the configuration signing key, stored in clear on the device row because this side signs. Presenting the raw secret as `X-Device-Key` is `401`. A device created before this model has no signing key: it still authenticates, pushes and heartbeats, but every route that would sign for it (`PUT …/config`, `PUT …/release`, `GET /api/devices/config`) answers `409` naming the fix, and `DeviceOut.needs_reprovision` is true.
 
-The backend writes `sites/{site_id}/remote_config.json`, signed; the device polls it every 300 s and applies a document only when `config_version` differs from the one in force. The document shape, signature scheme, clamp ranges and unreachable-blob semantics live in `DATA-CONTRACT.md` under **Device configuration**, because the device is the consumer and that file is canonical in the device repository.
+**Configuration is signed per device and delivered two ways.** `PUT /api/admin/devices/{id}/config` clamps, signs with that device's key, stores the exact signed bytes on its `DeviceConfig` row and writes `sites/{site_id}/remote_config.json` — in one operation, because saving without publishing would leave the panel showing a configuration no device will ever apply. It returns `published_to` and, when the site holds more than one device, `publish_warning` — a site has one blob, so a second device's tune replaces the first's document there; each device's own copy stays on its row, which is what `GET /api/devices/config` serves. The document shape, signature scheme, clamp ranges and unreachable-blob semantics live in `DATA-CONTRACT.md` under **Device configuration**, canonical in the device repository.
 
-`PUT /api/admin/devices/{id}/config` is where an administrator tunes it. That route clamps, signs and publishes in one operation: saving without publishing would leave the panel showing a configuration no device will ever apply. It returns `published_to` (the blob path) and, when the site holds more than one device, `publish_warning` — a site has exactly one configuration blob, so a second device's tune replaces the first's document, and that is said out loud rather than done silently.
+**Releases ride in the same document (Rpi-Detector D-021).** `release` (a git tag, `^v?[0-9A-Za-z][0-9A-Za-z._-]{0,63}$`) and `hold` sit inside `config` under the same signature; the tune route strips them if a form echoes them back, and `PUT /api/admin/devices/{id}/release` is the only writer. `GET /api/admin/releases` lists the tags GitHub reports for `OCEANKIND_RELEASE_REPO` (cached five minutes, empty when unreachable — a typed tag is always accepted) and the fleet default; `PUT /api/admin/releases/default` sets what a *new* device is assigned at creation. Assigning re-signs and re-publishes, bumping `config_version`, so the unit sees it at its next poll.
 
-With no `OCEANKIND_CONFIG_HMAC_KEY` configured the tune is refused with `503`. It is never persisted-but-unpublished and never published unsigned (R-6.2.1).
+`GET /api/devices/config` authenticates with `X-Device-Id` and `X-Device-Key`, not a session cookie (R-6.1). It returns the device's stored signed bytes and composes nothing of its own. Reading the document here and reading it from storage must never produce two different bytes, because that is precisely how a signature mismatch hides. If nothing has been published for the device it answers `404` — the honest answer, since the device keeps its last valid configuration and never falls back to defaults.
 
-`GET /api/devices/config` authenticates with `X-Device-Id` and `X-Device-Key`, not a session cookie (R-6.1). It is a **read-only debugging view**: it returns the stored blob byte for byte and composes nothing of its own. Reading the document here and reading it from storage must never produce two different bytes, because that is precisely how a signature mismatch hides. If nothing has been published for the site it answers `404` — the honest answer, since the device keeps its last valid configuration and never falls back to defaults.
+**Alerts leave from here, and only from here (Rpi-Detector D-020).** `services/alerts.py` sends through Twilio: a WhatsApp per first-time non-suppressed pushed event (with the `?play=` link), a voice call on a cluster, silence and recovery, degradation and recovery (`DeviceAlert(kind="degraded")`, `detail` = the reason), battery (`kind="battery"`), and a periodic heartbeat message. Sends run on a worker thread, never on a request. Without Twilio configured the backend is log-only and `/api/health` says so. Settings in `.env.example`.
 
 **Historical note.** Until 2026-08-22 this route served a payload it composed itself, with an `expires_utc` and an integer `config_version`. The canonical contract specifies blob transport, a string `config_version` and no expiry; the two sides canonicalised different objects, so configuration would have silently stopped applying. See D-020.
 

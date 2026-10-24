@@ -75,7 +75,9 @@ def admin():
 def creds(admin):
     r = admin.post("/api/admin/devices", json={"device_id": DEVICE, "site_id": SITE})
     assert r.status_code == 201
-    return {"X-Device-Id": DEVICE, "X-Device-Key": r.json()["key"], "pk": r.json()["id"]}
+    from app.core.security import derive_keys
+    return {"X-Device-Id": DEVICE, "X-Device-Key": derive_keys(r.json()["key"])[0],
+            "pk": r.json()["id"]}
 
 
 def headers(creds):
@@ -278,7 +280,7 @@ def test_alert_routes_show_open_outages(admin):
 
 def test_health_says_whether_anyone_is_notified(admin):
     body = admin.get("/api/health").json()
-    assert body["silence_alerts"] in ("webhook", "log-only", "off")
+    assert body["alerts"] in ("twilio", "log-only", "off")
 
 
 # ── FE-03 backing routes: event by id, hourly buckets ─────────────────────────

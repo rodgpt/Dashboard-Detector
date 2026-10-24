@@ -16,7 +16,7 @@ from sqlmodel import Session
 from app.main import app
 from app.core.database import init_db, engine
 from app.core.models import User, SiteAccess
-from app.core.security import hash_password
+from app.core.security import hash_password, derive_keys
 
 root = pathlib.Path(os.environ["OCEANKIND_LOCAL_STORAGE_ROOT"])
 (root).mkdir(parents=True, exist_ok=True)
@@ -97,17 +97,24 @@ def test_issued_key_returned_once_and_never_readable_again(admin_client):
                           json={"device_id": "Rpi_zapallar", "site_id": "zapallar"})
     assert r.status_code == 201
     body = r.json()
-    key = body["key"]
-    assert len(key) >= 32
+    secret = body["key"]
+    assert len(secret) >= 32
+    # one secret, two derived keys (D-020): the device presents the auth key
+    key, _config_key = derive_keys(secret)
 
-    # the list never exposes the key, and the hash never leaves the server
+    # the list never exposes the secret or either key, and the hash never leaves the server
     listed = admin_client.get("/api/admin/devices").json()
     assert [d["device_id"] for d in listed] == ["Rpi_zapallar"]
-    assert "key" not in listed[0] and "key_hash" not in listed[0]
+    assert "key" not in listed[0] and "key_hash" not in listed[0] and "config_key" not in listed[0]
     assert listed[0]["last_seen"] is None
+    assert listed[0]["needs_reprovision"] is False
 
-    # the issued key authenticates the device route. 404 because nothing has been
-    # published for this site yet — that is the honest answer, not a fabricated doc
+    # the secret itself is NOT the credential on the wire
+    r = admin_client.get("/api/devices/config",
+                         headers={"X-Device-Id": "Rpi_zapallar", "X-Device-Key": secret})
+    assert r.status_code == 401
+    # the derived key authenticates the device route. 404 because nothing has been
+    # published for this device yet — that is the honest answer, not a fabricated doc
     r = admin_client.get("/api/devices/config",
                          headers={"X-Device-Id": "Rpi_zapallar", "X-Device-Key": key})
     assert r.status_code == 404
@@ -133,7 +140,7 @@ def test_device_id_validated_and_unique(admin_client):
 def test_delete_revokes_device(admin_client):
     r = admin_client.post("/api/admin/devices",
                           json={"device_id": "Rpi_matanzas", "site_id": "matanzas"})
-    key, pk = r.json()["key"], r.json()["id"]
+    key, pk = derive_keys(r.json()["key"])[0], r.json()["id"]
     assert admin_client.delete(f"/api/admin/devices/{pk}").status_code == 204
     r = admin_client.get("/api/devices/config",
                          headers={"X-Device-Id": "Rpi_matanzas", "X-Device-Key": key})
@@ -147,7 +154,7 @@ def test_delete_device_that_has_heartbeated(admin_client):
     created one that never connected."""
     r = admin_client.post("/api/admin/devices",
                           json={"device_id": "Rpi_matanzas_hb", "site_id": "matanzas"})
-    key, pk = r.json()["key"], r.json()["id"]
+    key, pk = derive_keys(r.json()["key"])[0], r.json()["id"]
     creds = {"X-Device-Id": "Rpi_matanzas_hb", "X-Device-Key": key}
     hb = admin_client.post("/api/devices/heartbeat", headers=creds, json={
         "schema_version": 2, "site": "matanzas", "device": "Rpi_matanzas_hb",
@@ -166,7 +173,9 @@ def cfg_device(admin_client):
     r = admin_client.post("/api/admin/devices",
                           json={"device_id": "Rpi_cfg", "site_id": "zapallar"})
     body = r.json()
-    return {"pk": body["id"], "device_id": body["device_id"], "key": body["key"]}
+    auth_key, config_key = derive_keys(body["key"])
+    return {"pk": body["id"], "device_id": body["device_id"], "secret": body["key"],
+            "key": auth_key, "config_key": config_key}
 
 
 def test_config_defaults_before_first_tune(admin_client, cfg_device):
@@ -212,11 +221,15 @@ def test_published_blob_is_the_contract_document_and_verifies(admin_client, cfg_
 
     assert doc["schema_version"] == 2
     assert doc["site"] == "zapallar"
-    assert doc["device_id"] == "Rpi_cfg"          # optional narrowing; null = whole site
+    assert doc["device_id"] == "Rpi_cfg"          # the device whose key signed it
     assert isinstance(doc["config_version"], str) and doc["config_version"] != "default"
     assert "expires_utc" not in doc               # there is no expiry (D-020)
     assert doc["config"]["score_min"] == 0.95     # the clamped value is what ships
-    assert doc["signature"] == sign(doc, "test-signing-key-0123456789abcdef")
+    # release assignment rides inside config (Rpi-Detector D-021); none yet
+    assert doc["config"]["release"] is None and doc["config"]["hold"] is False
+    # signed with THIS device's derived key, not a global one (Rpi-Detector D-020)
+    assert doc["signature"] == sign(doc, cfg_device["config_key"])
+    assert doc["signature"] != sign(doc, "test-signing-key-0123456789abcdef")
 
 
 def test_debug_view_returns_the_blob_byte_for_byte(admin_client, cfg_device):
@@ -256,17 +269,110 @@ def test_tune_rejects_what_clamping_must_not_fix(admin_client, cfg_device):
     assert r.status_code == 200 and r.json()["config"]["window_hop_s"] == 1.0
 
 
-def test_no_hmac_key_refuses_to_publish_rather_than_publish_unsigned(admin_client, cfg_device):
-    from app.core.config import settings
-    s = settings()
-    old = s.config_hmac_key
-    s.config_hmac_key = ""
+def test_device_without_signing_key_cannot_be_configured(admin_client, cfg_device):
+    """A device created before D-020 has no per-device key. Refuse to sign (409,
+    naming the fix) rather than sign with a key the unit does not hold, and
+    never publish unsigned. The panel flags it as `needs_reprovision`."""
+    from app.core.models import Device
+    with Session(engine()) as db:
+        d = db.get(Device, cfg_device["pk"])
+        old = d.config_key
+        d.config_key = None
+        db.add(d); db.commit()
     try:
         r = admin_client.put(f"/api/admin/devices/{cfg_device['pk']}/config",
                              json={"score_min": 0.7})
-        assert r.status_code == 503
+        assert r.status_code == 409 and "re" in r.json()["detail"].lower()
+        r = admin_client.put(f"/api/admin/devices/{cfg_device['pk']}/release",
+                             json={"release": "v2.2.0"})
+        assert r.status_code == 409
+        listed = {d["device_id"]: d for d in admin_client.get("/api/admin/devices").json()}
+        assert listed["Rpi_cfg"]["needs_reprovision"] is True
+        # and the device itself is told, not handed a document it cannot verify
+        from fastapi.testclient import TestClient as _TC
+        from app.main import app as _app
+        r = _TC(_app).get("/api/devices/config",
+                          headers={"X-Device-Id": cfg_device["device_id"],
+                                   "X-Device-Key": cfg_device["key"]})
+        assert r.status_code == 409
     finally:
-        s.config_hmac_key = old
+        with Session(engine()) as db:
+            d = db.get(Device, cfg_device["pk"])
+            d.config_key = old
+            db.add(d); db.commit()
+
+
+# ── assigned releases (Rpi-Detector D-021) ───────────────────────────────────
+
+def test_assign_release_resigns_and_republishes(admin_client, cfg_device):
+    from app.services.deviceconfig import sign
+    import json as _json
+    pk = cfg_device["pk"]
+    before = admin_client.get(f"/api/admin/devices/{pk}/config").json()
+    r = admin_client.put(f"/api/admin/devices/{pk}/release", json={"release": "v2.2.0"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["release"] == "v2.2.0" and body["hold"] is False
+    assert body["config_version"] != before["config_version"]   # the unit sees a new version
+    assert body["config"] == before["config"]                    # thresholds untouched
+    # the device route serves exactly the re-signed document
+    from fastapi.testclient import TestClient as _TC
+    from app.main import app as _app
+    r = _TC(_app).get("/api/devices/config",
+                      headers={"X-Device-Id": cfg_device["device_id"],
+                               "X-Device-Key": cfg_device["key"]})
+    doc = _json.loads(r.content)
+    assert doc["config"]["release"] == "v2.2.0" and doc["config"]["hold"] is False
+    assert doc["signature"] == sign(doc, cfg_device["config_key"])
+    # hold alone, release kept
+    r = admin_client.put(f"/api/admin/devices/{pk}/release", json={"hold": True})
+    assert r.json()["hold"] is True and r.json()["release"] == "v2.2.0"
+    # a tag that is not a tag is refused
+    assert admin_client.put(f"/api/admin/devices/{pk}/release",
+                            json={"release": "main; rm -rf /"}).status_code == 400
+    # the panel lists it
+    listed = {d["device_id"]: d for d in admin_client.get("/api/admin/devices").json()}
+    assert listed["Rpi_cfg"]["assigned_release"] == "v2.2.0" and listed["Rpi_cfg"]["hold"] is True
+    # clearing the assignment
+    r = admin_client.put(f"/api/admin/devices/{pk}/release", json={"release": None, "hold": False})
+    assert r.json()["release"] is None
+
+
+def test_tune_cannot_smuggle_release_keys(admin_client, cfg_device):
+    """`release`/`hold` are set through the release route; a tune that submits
+    them is not an error (the form may echo the config back) but does not
+    change the assignment."""
+    pk = cfg_device["pk"]
+    admin_client.put(f"/api/admin/devices/{pk}/release", json={"release": "v2.2.1"})
+    r = admin_client.put(f"/api/admin/devices/{pk}/config",
+                         json={"score_min": 0.55, "release": "v9.9.9", "hold": True})
+    assert r.status_code == 200
+    assert r.json()["release"] == "v2.2.1" and r.json()["hold"] is False
+    assert r.json()["config"]["score_min"] == 0.55
+
+
+def test_fleet_default_assigned_at_creation(admin_client):
+    r = admin_client.get("/api/admin/releases")
+    assert r.status_code == 200 and r.json()["fleet_default"] is None
+    assert isinstance(r.json()["tags"], list)
+    assert admin_client.put("/api/admin/releases/default",
+                            json={"release": "not a tag!"}).status_code == 400
+    r = admin_client.put("/api/admin/releases/default", json={"release": "v2.2.0"})
+    assert r.json()["fleet_default"] == "v2.2.0"
+    r = admin_client.post("/api/admin/devices",
+                          json={"device_id": "Rpi_fresh", "site_id": "matanzas"})
+    assert r.status_code == 201
+    assert r.json()["assigned_release"] == "v2.2.0" and r.json()["hold"] is False
+    # and the fresh unit can fetch its signed document right away
+    from fastapi.testclient import TestClient as _TC
+    from app.main import app as _app
+    auth_key, config_key = derive_keys(r.json()["key"])
+    doc = _TC(_app).get("/api/devices/config",
+                        headers={"X-Device-Id": "Rpi_fresh", "X-Device-Key": auth_key}).json()
+    from app.services.deviceconfig import sign
+    assert doc["config"]["release"] == "v2.2.0" and doc["signature"] == sign(doc, config_key)
+    admin_client.delete(f"/api/admin/devices/{r.json()['id']}")
+    admin_client.put("/api/admin/releases/default", json={"release": None})
 
 
 # ── site registry (R-3.1) ────────────────────────────────────────────────────

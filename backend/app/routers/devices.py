@@ -7,10 +7,10 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Response, s
 from sqlmodel import Session, select
 
 from app.core.database import get_session
-from app.core.models import Device, DeviceStatus, DeviceStatusHistory, as_utc
+from app.core.models import Device, DeviceConfig, DeviceStatus, DeviceStatusHistory, as_utc
 from app.core.security import verify_password
 from app.core.config import settings
-from app.services import deviceconfig, indexer
+from app.services import alerts, deviceconfig, indexer
 from app.services.storage import get_storage
 
 router = APIRouter()
@@ -44,32 +44,36 @@ def current_device(x_device_key: str = Header(...), x_device_id: str = Header(..
 
 
 @router.get("/config")
-def device_config(device: Device = Depends(current_device)):
-    """**The configuration blob, byte for byte** (D-020).
+def device_config(device: Device = Depends(current_device),
+                  db: Session = Depends(get_session)):
+    """**This device's signed configuration, byte for byte** (D-020, Rpi D-020).
 
-    Two consumers. A unit with storage configured reads
-    `sites/{site_id}/remote_config.json` from storage itself and uses this route
-    only as a debugging view. A **push-only** unit (no Azure, no local output
-    directory — the QUICKGUIDE provisioning path) has no blob to read and polls
-    this route every `CONFIG_CHECK_INTERVAL` instead (device F-34, 2026-10-24).
-    Either way it returns the stored document **byte for byte** — reading it
-    here and reading it from storage must never produce two different
-    documents, because that is how a signature mismatch hides.
+    Signed with the device's own key, so it is served from the device's row:
+    the exact bytes `_publish` signed, which are also what the site blob holds
+    when this is the site's only device. A push-only unit (no storage) polls
+    this every `CONFIG_CHECK_INTERVAL`; a storage unit reads the blob and uses
+    this as a debugging view. Reading it here and reading it from storage must
+    never produce two different documents, because that is how a signature
+    mismatch hides.
 
-    It deliberately does not compose a document of its own. If the blob is
-    absent, that is the honest answer: nothing has been published for this site.
+    It deliberately does not compose a document of its own. If nothing has
+    been published for this device, that is the honest answer (404): the unit
+    keeps its last valid configuration and never falls back to defaults.
     """
-    if not settings().config_hmac_key:
-        # Loud, and only on this route. Never a hint that unsigned would do.
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
-                            "config HMAC key not provisioned on the server")
-
+    if not device.config_key:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "device predates per-device keys (D-020); re-provision it")
+    row = db.exec(select(DeviceConfig).where(DeviceConfig.device_id == device.device_id)).first()
+    if row is not None and row.signed_json:
+        return Response(row.signed_json.encode(), media_type="application/json")
+    # Row without a signed copy (published before D-020): fall back to the blob,
+    # which the unit cannot verify with a per-device key anyway, but is honest.
     path = deviceconfig.CONFIG_BLOB.format(site_id=device.site_id)
     storage = get_storage()
-    if not storage.exists(path):
+    if row is None or not storage.exists(path):
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            f"no configuration has been published for site '{device.site_id}'. "
+            f"no configuration has been published for device '{device.device_id}'. "
             "the device keeps its last valid configuration; it does not fall back to defaults")
     return Response(storage.get(path), media_type="application/json")
 
@@ -122,6 +126,12 @@ def push_event(payload: Any = Body(...),
     device.last_push_utc = datetime.now(timezone.utc)
     db.add(device)
     db.commit()
+
+    # The backend is the only sender (Rpi-Detector D-020): a detection reaching
+    # the index for the first time is what triggers the WhatsApp and counts
+    # toward the cluster call. A replay (already indexed) announces nothing.
+    if created:
+        alerts.on_event(db, device.site_id, payload)
 
     # `indexed: false` means "already present", never "rejected". The device
     # treats both as done; this is here so an operator debugging a spool drain
@@ -186,6 +196,7 @@ def heartbeat(payload: dict = Body(...),
     existing = db.get(DeviceStatus, device.id)
     if existing and reported_dt <= as_utc(existing.reported_last_seen):
         return {"accepted": False, "reason": "stale — not newer than the stored reading"}
+    prev_payload = dict(existing.payload) if existing and existing.payload else None
     if existing:
         existing.reported_last_seen = reported_dt
         existing.received_utc = now
@@ -196,5 +207,9 @@ def heartbeat(payload: dict = Body(...),
                             received_utc=now, payload=payload))
     db.add(DeviceStatusHistory(device_id=device.id, reported_last_seen=reported_dt,
                                received_utc=now, payload=payload))
+    # Degradation and battery alerts are decided here, from the transition
+    # between this heartbeat and the previous one (Rpi-Detector D-020). Rows
+    # are written on this session; the sends are queued, never inline.
+    alerts.on_heartbeat(db, device.id, device.site_id, prev_payload, payload)
     db.commit()
     return {"accepted": True}

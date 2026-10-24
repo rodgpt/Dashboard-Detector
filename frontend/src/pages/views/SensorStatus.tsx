@@ -26,7 +26,7 @@ const UPTIME_HOURS = 72;
 /** Campos de `health` que esta versión entiende. El resto se muestra igual. */
 const KNOWN_HEALTH = new Set([
   "detector_ok", "audio_ok", "capture_ok", "duty_cycle_pct", "last_clip_age_s",
-  "clips_dropped", "upload_backlog", "alerts_enabled", "degraded_reason",
+  "clips_dropped", "upload_backlog", "degraded_reason",
 ]);
 
 const bool = (v: unknown) =>
@@ -72,6 +72,12 @@ export default function SensorStatus({ siteId, status }: { siteId: string; statu
               <HealthBadge status={doc} />
               <span className="sensor-device">
                 {doc.device ?? "equipo sin identificar"} · v{doc.software_version ?? "?"}
+                {/* Release instalada vs asignada (Rpi-Detector D-021), del bloque `ota` */}
+                {doc.ota?.installed_release ? ` · ${doc.ota.installed_release}` : ""}
+                {doc.ota?.hold ? " · retenida" : ""}
+                {doc.ota?.assigned_release && doc.ota.assigned_release !== doc.ota.installed_release
+                  ? ` → ${doc.ota.assigned_release}${doc.ota.failed_release === doc.ota.assigned_release ? " (falló, revertida)" : " (pendiente)"}`
+                  : ""}
               </span>
             </div>
 
@@ -99,9 +105,9 @@ export default function SensorStatus({ siteId, status }: { siteId: string; statu
                 absent: "aún no hay ventana medida" },
               { label: "Clips descartados", value: health.clips_dropped, warn: (v) => v > 0 },
               { label: "Subidas pendientes", value: health.upload_backlog, warn: (v) => v > 0 },
-              // No es "warn": un equipo de banco sin Twilio está funcionando
-              // exactamente como se configuró, no degradado (DATA-CONTRACT.md).
-              { label: "Alertas WhatsApp (Twilio)", value: bool(health.alerts_enabled) },
+              // "Alertas WhatsApp" ya no es un dato del equipo: avisa el
+              // servidor (D-020). El aviso de "no llega a nadie" vive en el
+              // armazón (Dashboard.tsx), una sola vez para todos los sitios.
             ]} />
 
             {health.degraded_reason && (

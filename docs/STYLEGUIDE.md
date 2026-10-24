@@ -50,6 +50,8 @@ Counts are occurrences in the current file, which is a decent proxy for how load
 | Alert accent | `#e03e52` | | | Detection emphasis |
 | Alert accent, warm | `#d85a30` | | | |
 
+**Table-cell states (2026-10-24, `styles.css`).** Admin → Dispositivos colours two cells by text only, no fill: `td.push-bad` (push refused, `--err-text`, bold) and the release column `td.release-bad` / `-pending` / `-ok` / `-muted` (`--err-text` bold / `--warn-text` / `--ok-text` / `--dim`). Red is reserved for the two states a human must act on — a release that was tried and rolled back, and a device that cannot be signed for — and in both the text says so; colour is never the only signal. Everything else in that column is informational.
+
 **Known inconsistency.** Two greens (`#22c55e` for dots, `#1a6e3a` for text) and two reds (`#ef4444` for dots, `#b91c1c` for text) coexist. That is defensible as dot-versus-text contrast, but it is not written down anywhere and the next person will pick one at random. It is written down now: **`#22c55e` and `#ef4444` are indicator dots. `#1a6e3a` and `#b91c1c` are text on light fills.**
 
 ---
