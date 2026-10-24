@@ -62,9 +62,14 @@ def create_user(body: UserIn, _: User = Depends(require_admin), db: Session = De
 
     u = User(email=body.email.lower(), password_hash=hash_password(body.password), role=body.role)
     db.add(u); db.commit(); db.refresh(u)
-    for s in body.sites:
-        db.add(SiteAccess(user_id=u.id, site_id=s))
-    db.commit()
+    # Site checkboxes only mean something for an operator: an admin's access is
+    # unconditional (assert_site_allowed never consults SiteAccess for them),
+    # so a grant recorded here would be inert and, worse, invisible — the users
+    # table shows "todos los sitios" for any admin rather than its real rows.
+    if body.role != "admin":
+        for s in body.sites:
+            db.add(SiteAccess(user_id=u.id, site_id=s))
+        db.commit()
     return _out(u, db)
 
 
@@ -74,6 +79,9 @@ def set_sites(user_id: int, body: SitesIn, _: User = Depends(require_admin),
     u = db.get(User, user_id)
     if not u:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such user")
+    if u.role == "admin":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "sites do not apply to an admin account; its access is unconditional")
     db.exec(delete(SiteAccess).where(SiteAccess.user_id == user_id))
     for s in body.sites:
         db.add(SiteAccess(user_id=user_id, site_id=s))
@@ -202,7 +210,12 @@ def delete_site(site_id: str, _: User = Depends(require_admin),
         names = ", ".join(d.device_id for d in devices)
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"site still has device(s): {names}. remove them first")
-    grants = list(db.exec(select(SiteAccess).where(SiteAccess.site_id == site_id)))
+    # Only an operator's grant actually gates anything (assert_site_allowed
+    # never consults SiteAccess for an admin), so an admin-held row — however
+    # it got there — must never be the thing that keeps a site undeletable.
+    grants = list(db.exec(
+        select(SiteAccess).join(User, User.id == SiteAccess.user_id)
+        .where(SiteAccess.site_id == site_id, User.role != "admin")))
     if grants:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"{len(grants)} user(s) are still assigned to this site")

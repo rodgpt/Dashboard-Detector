@@ -94,30 +94,39 @@ export default function UsersPanel({ sites, users, meEmail, onChanged, onError }
           <div className="field">
             <label htmlFor="new-role">Rol</label>
             <select id="new-role" value={role}
-                    onChange={(e) => setRole(e.target.value as "operator" | "admin")}>
+                    onChange={(e) => {
+                      const next = e.target.value as "operator" | "admin";
+                      setRole(next);
+                      // Sites don't apply to an admin account — its access is
+                      // unconditional — so stale checkbox state must not ride
+                      // along into the create call if the role is switched
+                      // after some boxes were already checked.
+                      if (next === "admin") setSelected(new Set());
+                    }}>
               <option value="operator">Operación — ve sus sitios asignados</option>
               <option value="admin">Administración — ve todo y gestiona usuarios</option>
             </select>
           </div>
         </div>
 
-        <div className="field">
-          <label>Sitios asignados</label>
-          <div className="site-checks">
-            {sites.length === 0 && <span className="chip none">no hay sitios disponibles</span>}
-            {sites.map((s) => (
-              <label key={s.id}>
-                <input type="checkbox" checked={selected.has(s.id)}
-                       onChange={() => setSelected((p) => toggle(p, s.id))} />
-                {s.name || s.id}
-              </label>
-            ))}
+        {role === "operator" && (
+          <div className="field">
+            <label>Sitios asignados</label>
+            <div className="site-checks">
+              {sites.length === 0 && <span className="chip none">no hay sitios disponibles</span>}
+              {sites.map((s) => (
+                <label key={s.id}>
+                  <input type="checkbox" checked={selected.has(s.id)}
+                         onChange={() => setSelected((p) => toggle(p, s.id))} />
+                  {s.name || s.id}
+                </label>
+              ))}
+            </div>
           </div>
-          <p className="hint">
-            Una cuenta de administración ve todos los sitios; las casillas sólo
-            aplican al rol de operación.
-          </p>
-        </div>
+        )}
+        {role === "admin" && (
+          <p className="hint">Una cuenta de administración ve todos los sitios.</p>
+        )}
 
         {feedback && (
           <div className={`form-feedback ${feedback.kind}`} role="alert">{feedback.text}</div>
