@@ -188,7 +188,7 @@ def gen_events(out: Path, site, now, days, rng, clips=True, episodes_per_day=10.
     return sorted(written, key=lambda e: e["captured_utc"], reverse=True)
 
 
-def gen_status(out: Path, site, now, rng, healthy=True):
+def gen_status(out: Path, site, now, rng, healthy=True, alerts_enabled=True):
     s = envelope(site["id"], site["device"], now,
         software_version="2.0.0",
         last_seen=iso(now - timedelta(seconds=rng.randint(5, 90))),
@@ -201,6 +201,7 @@ def gen_status(out: Path, site, now, rng, healthy=True):
             "duty_cycle_pct": round(rng.uniform(98.6, 99.9), 1) if healthy else 61.2,
             "clips_dropped": 0 if healthy else rng.randint(3, 40),
             "upload_backlog": 0 if healthy else rng.randint(1, 12),
+            "alerts_enabled": alerts_enabled,
             "degraded_reason": None if healthy else "detector failed to load",
         },
         detection={
@@ -387,7 +388,10 @@ def main():
     for i, site in enumerate(SITES):
         events = gen_events(out, site, now, args.days, rng, clips=not args.no_clips,
                             episodes_per_day=args.episodes_per_day)
-        gen_status(out, site, now, rng, healthy=(i == 0))   # matanzas ships degraded on purpose
+        # matanzas ships degraded on purpose; zapallar is the bench case — fully
+        # healthy, just no Twilio, so the "operativo (banco, sin Twilio)" path
+        # has a fixture to render against instead of only existing on paper.
+        gen_status(out, site, now, rng, healthy=(i == 0), alerts_enabled=(i != 0))
         gen_power_history(out, site, now, rng)
         gen_acoustic(out, site, now, rng)
         gen_ocean(out, site, now, rng)

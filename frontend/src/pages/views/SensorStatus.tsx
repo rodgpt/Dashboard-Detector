@@ -25,7 +25,7 @@ type Doc = Record<string, any>;
 /** Campos de `health` que esta versión entiende. El resto se muestra igual. */
 const KNOWN_HEALTH = new Set([
   "detector_ok", "audio_ok", "duty_cycle_pct", "clips_dropped",
-  "upload_backlog", "degraded_reason",
+  "upload_backlog", "alerts_enabled", "degraded_reason",
 ]);
 
 const bool = (v: unknown) =>
@@ -86,6 +86,9 @@ export default function SensorStatus({ siteId }: { siteId: string }) {
                 absent: "aún no hay ventana medida" },
               { label: "Clips descartados", value: health.clips_dropped, warn: (v) => v > 0 },
               { label: "Subidas pendientes", value: health.upload_backlog, warn: (v) => v > 0 },
+              // No es "warn": un equipo de banco sin Twilio está funcionando
+              // exactamente como se configuró, no degradado (DATA-CONTRACT.md).
+              { label: "Alertas WhatsApp (Twilio)", value: bool(health.alerts_enabled) },
             ]} />
 
             {health.degraded_reason && (

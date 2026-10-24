@@ -255,6 +255,7 @@ table.data td.actions .btn + .btn { margin-left: 8px; }
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
 .banner.error { background: var(--err-fill); border: 1px solid var(--err-border); color: var(--err-text); }
+.banner.warn { background: var(--warn-fill); border: 1px solid var(--warn); color: var(--warn-text); }
 .loading { color: var(--dim); font-size: .9rem; padding: 12px 0; }
 .centered { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
 

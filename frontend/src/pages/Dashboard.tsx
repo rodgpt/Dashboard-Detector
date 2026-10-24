@@ -100,16 +100,30 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* El mapa vive arriba de las pestañas: es el "de un vistazo" del que
-          habla R-7.4 cuando hay más de un sitio. */}
-      {list.filter((s) => s.lat != null && s.lon != null).length > 0 && (
-        <section className="panel">
-          <div className="panel-head"><h2>Sitios</h2></div>
-          <SiteMap sites={list}
-                   health={{ [siteId ?? ""]: health.state } as Record<string, HealthState>}
-                   selected={siteId} onSelect={setSelected} />
-        </section>
+      {/* Informativo, no un fallo: un equipo de banco sin Twilio sigue
+          detectando y registrando con normalidad, solo no avisa por WhatsApp.
+          Independiente del estado de salud — por eso no se repite el texto
+          del badge de arriba (R-7.4: una sola fuente para el mismo aviso). */}
+      {health.state === "ok" && health.alertsEnabled === false && (
+        <div className="banner warn" role="status">
+          <span>
+            <strong>Alertas por WhatsApp desactivadas.</strong> Sin credenciales
+            Twilio — modo banco. Las detecciones se siguen registrando y
+            mostrando con normalidad; solo no se notifican por WhatsApp.
+          </span>
+        </div>
       )}
+
+      {/* El mapa vive arriba de las pestañas: es el "de un vistazo" del que
+          habla R-7.4 cuando hay más de un sitio. SiteMap decide por sí mismo
+          si dibuja el mapa o el aviso de "sin coordenadas" — el panel no debe
+          desaparecer entero solo porque ningún sitio tiene lat/lon. */}
+      <section className="panel">
+        <div className="panel-head"><h2>Sitios</h2></div>
+        <SiteMap sites={list}
+                 health={{ [siteId ?? ""]: health.state } as Record<string, HealthState>}
+                 selected={siteId} onSelect={setSelected} />
+      </section>
 
       <nav className="tab-nav">
         {TABS.map((t) => (
