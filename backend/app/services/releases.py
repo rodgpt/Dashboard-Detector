@@ -31,11 +31,13 @@ def valid_tag(value: Optional[str]) -> bool:
     return value is None or bool(TAG_RE.match(value))
 
 
-def github_tags() -> list[str]:
+def github_tags(refresh: bool = False) -> list[str]:
     """Tags of `release_repo`, newest first as GitHub orders them. Empty on any
-    failure — the panel then only accepts a typed tag."""
+    failure — the panel then only accepts a typed tag. `refresh=True` bypasses
+    the cache: the panel sends it when an operator opens the assignment row,
+    because the tag they just pushed is the one they want to see."""
     now = time.monotonic()
-    if now - _cache["at"] < CACHE_S:
+    if not refresh and now - _cache["at"] < CACHE_S:
         return list(_cache["tags"])
     repo = settings().release_repo
     try:

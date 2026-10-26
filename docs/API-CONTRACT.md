@@ -52,7 +52,7 @@ Base path `/api`. JSON in, JSON out. Session state in an HttpOnly cookie, never 
 | `GET` | `/api/admin/alerts` | cookie, admin | Open device alerts across all sites (`silent`, `degraded`, `battery`). `?open_only=false` for history |
 | `GET` | `/api/admin/devices/{id}/config` | cookie, admin | Effective (clamped) config, version, default or tuned, plus `release`/`hold` |
 | `PUT` | `/api/admin/devices/{id}/config` | cookie, admin | Tune. Clamped on write; adjustments reported back. `409` for a device created before D-020 |
-| `GET` | `/api/admin/releases` | cookie, admin | Tags of the device repository (GitHub, cached 300 s; empty if unreachable) and the fleet default (Rpi-Detector D-021) |
+| `GET` | `/api/admin/releases` | cookie, admin | Tags of the device repository (GitHub, cached 300 s; `?refresh=true` asks GitHub now; empty if unreachable) and the fleet default (Rpi-Detector D-021) |
 | `PUT` | `/api/admin/releases/default` | cookie, admin | The release a NEW device is assigned at creation. Existing assignments untouched |
 | `PUT` | `/api/admin/devices/{id}/release` | cookie, admin | Assign a release and/or set `hold` for one device; re-signs and re-publishes its configuration. `400` if not a tag, `409` pre-D-020 |
 | `GET` | `/api/devices/config` | device headers | This device's signed configuration, byte for byte what was signed for it. Debug view for storage units; **the delivery path for push-only units** (device F-34). `409` pre-D-020 |

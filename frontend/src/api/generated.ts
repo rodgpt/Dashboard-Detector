@@ -248,7 +248,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Releases */
+        /**
+         * List Releases
+         * @description `?refresh=true` asks GitHub now instead of serving the 5-minute cache —
+         *     the panel sends it when the assignment row opens.
+         */
         get: operations["list_releases_api_admin_releases_get"];
         put?: never;
         post?: never;
@@ -1548,7 +1552,9 @@ export interface operations {
     };
     list_releases_api_admin_releases_get: {
         parameters: {
-            query?: never;
+            query?: {
+                refresh?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1562,6 +1568,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReleasesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

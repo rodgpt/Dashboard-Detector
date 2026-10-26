@@ -254,7 +254,10 @@ export const admin = {
     req<DeviceConfigState>(`/admin/devices/${id}/config`, { method: "PUT", ...json(config) }),
 
   // ── releases (Rpi-Detector D-021): publish a tag, then choose who takes it ──
-  releases: () => req<Releases>("/admin/releases"),
+  /** `refresh` bypasses the backend's 5-minute GitHub cache — used when an
+   *  operator opens the assignment row, so a just-pushed tag is offered. */
+  releases: (refresh = false) =>
+    req<Releases>(`/admin/releases${refresh ? "?refresh=true" : ""}`),
   /** The release a NEW device gets at creation. Existing assignments untouched. */
   setFleetRelease: (release: string | null) =>
     req<Releases>("/admin/releases/default", { method: "PUT", ...json({ release }) }),

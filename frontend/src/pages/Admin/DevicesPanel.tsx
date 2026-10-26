@@ -46,8 +46,8 @@ function releaseState(d: AdminDevice): { text: string; tone: "ok" | "bad" | "pen
 const TAG = /^v?[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/;
 
 /** A tag from the list, or one typed by hand (GitHub may be unreachable). */
-function ReleasePicker({ id, tags, value, onChange }: {
-  id: string; tags: string[]; value: string; onChange: (v: string) => void;
+function ReleasePicker({ id, tags, value, onChange, loading = false }: {
+  id: string; tags: string[]; value: string; onChange: (v: string) => void; loading?: boolean;
 }) {
   return (
     <div className="field">
@@ -58,7 +58,9 @@ function ReleasePicker({ id, tags, value, onChange }: {
         {tags.map((t) => <option key={t} value={t} />)}
       </datalist>
       <p className="hint">
-        {tags.length ? `${tags.length} tags publicados en el repositorio.` : "No se pudo leer la lista de tags; escribe el nombre."}
+        {loading ? "Consultando los tags del repositorio…"
+          : tags.length ? `${tags.length} tags publicados en el repositorio (↓ para verlos).`
+          : "No se pudo leer la lista de tags; escribe el nombre."}
         {" "}Vacío = sin asignación (el equipo conserva lo que corre).
       </p>
     </div>
@@ -88,17 +90,29 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
   // Releases (D-021): tags + fleet default. Loaded once; the list is advisory.
   const [releases, setReleases] = useState<Releases | null>(null);
   const [releasesError, setReleasesError] = useState<string | null>(null);
+  const [releasesLoading, setReleasesLoading] = useState(false);
   const [fleetInput, setFleetInput] = useState("");
   const [assignInput, setAssignInput] = useState("");
   const [assignHold, setAssignHold] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    admin.releases()
-      .then((r) => { if (alive) { setReleases(r); setFleetInput(r.fleet_default ?? ""); } })
-      .catch((err) => { if (alive) setReleasesError(messageFor(err, "No se pudo leer la lista de releases.")); });
-    return () => { alive = false; };
-  }, []);
+  /** Loaded once on mount from the backend cache, and again, bypassing the
+   *  cache, every time an assignment row opens: the tag the operator just
+   *  pushed is the one they came here to assign. */
+  async function loadReleases(refresh: boolean) {
+    setReleasesLoading(true);
+    try {
+      const r = await admin.releases(refresh);
+      setReleases(r);
+      setReleasesError(null);
+      setFleetInput((cur) => cur || (r.fleet_default ?? ""));
+    } catch (err) {
+      setReleasesError(messageFor(err, "No se pudo leer la lista de releases."));
+    } finally {
+      setReleasesLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadReleases(false); }, []);
 
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
   const tags = releases?.tags ?? [];
@@ -176,6 +190,7 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
     setUpdating(d.id);
     setAssignInput(d.assigned_release ?? "");
     setAssignHold(d.hold);
+    void loadReleases(true);
   }
 
   async function assign(d: AdminDevice, e: FormEvent) {
@@ -353,7 +368,8 @@ export default function DevicesPanel({ sites, devices, onChanged, onError }: Pro
                     <td colSpan={6}>
                       <form className="row-editor" onSubmit={(e) => void assign(d, e)} noValidate>
                         <div className="form-grid">
-                          <ReleasePicker id={`assign-${d.id}`} tags={tags} value={assignInput} onChange={setAssignInput} />
+                          <ReleasePicker id={`assign-${d.id}`} tags={tags} value={assignInput}
+                                         onChange={setAssignInput} loading={releasesLoading} />
                           <div className="field">
                             <label htmlFor={`hold-${d.id}`}>Retener</label>
                             <label className="hint" htmlFor={`hold-${d.id}`} style={{ display: "flex", gap: 8, alignItems: "center" }}>

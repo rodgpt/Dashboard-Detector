@@ -1729,7 +1729,20 @@
   },
   "/api/admin/releases": {
    "get": {
+    "description": "`?refresh=true` asks GitHub now instead of serving the 5-minute cache \u2014\nthe panel sends it when the assignment row opens.",
     "operationId": "list_releases_api_admin_releases_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "refresh",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Refresh",
+       "type": "boolean"
+      }
+     }
+    ],
     "responses": {
      "200": {
       "content": {
@@ -1740,6 +1753,16 @@
        }
       },
       "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
      }
     },
     "summary": "List Releases",

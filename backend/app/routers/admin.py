@@ -537,8 +537,12 @@ class FleetDefaultIn(BaseModel):
 
 
 @router.get("/releases", response_model=ReleasesOut)
-def list_releases(_: User = Depends(require_admin), db: Session = Depends(get_session)):
-    return ReleasesOut(tags=releases.github_tags(), fleet_default=releases.fleet_default(db))
+def list_releases(refresh: bool = False, _: User = Depends(require_admin),
+                  db: Session = Depends(get_session)):
+    """`?refresh=true` asks GitHub now instead of serving the 5-minute cache —
+    the panel sends it when the assignment row opens."""
+    return ReleasesOut(tags=releases.github_tags(refresh=refresh),
+                       fleet_default=releases.fleet_default(db))
 
 
 @router.put("/releases/default", response_model=ReleasesOut)
