@@ -23,7 +23,8 @@ from app.services.deviceconfig import TAG_RE
 log = logging.getLogger(__name__)
 
 _cache: dict = {"at": 0.0, "tags": []}
-CACHE_S = 300
+CACHE_S = 300        # a successful listing is good for this long
+RETRY_S = 30         # a failed one is retried this soon — never cached as "no tags"
 
 
 def valid_tag(value: Optional[str]) -> bool:
@@ -37,7 +38,6 @@ def github_tags() -> list[str]:
     if now - _cache["at"] < CACHE_S:
         return list(_cache["tags"])
     repo = settings().release_repo
-    tags: list[str] = []
     try:
         req = urllib.request.Request(
             f"https://api.github.com/repos/{repo}/tags?per_page=50",
@@ -45,7 +45,11 @@ def github_tags() -> list[str]:
         with urllib.request.urlopen(req, timeout=5) as resp:
             tags = [t["name"] for t in json.loads(resp.read()) if TAG_RE.match(str(t.get("name", "")))]
     except Exception as exc:                                    # noqa: BLE001
-        log.info("could not list tags for %s: %s", repo, exc)
+        # Loud, and not cached as an answer: the panel says "could not read the
+        # list" and the operator can find out why here, now, not in five minutes.
+        log.warning("could not list tags for %s (panel will accept a typed tag): %s", repo, exc)
+        _cache.update(at=now - CACHE_S + RETRY_S, tags=[])
+        return []
     _cache.update(at=now, tags=tags)
     return list(tags)
 
